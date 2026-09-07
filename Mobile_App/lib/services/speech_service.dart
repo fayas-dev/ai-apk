@@ -118,6 +118,8 @@ class JarvisSpeechService {
 
   Future<void> startListening({
     required Function(String text, bool isFinal) onResult,
+    Duration listenFor = const Duration(seconds: 30),
+    Duration pauseFor = const Duration(seconds: 3),
   }) async {
     if (!_isAvailable) {
       final initialized = await initialize();
@@ -138,9 +140,9 @@ class JarvisSpeechService {
           // isFinal = true when STT confirms the utterance is complete.
           onResult(words, result.finalResult);
         },
-        listenFor: const Duration(seconds: 30),
-        // pauseFor: how long silence before auto-finalizing (4s is best)
-        pauseFor: const Duration(seconds: 4),
+        listenFor: listenFor,
+        // Do not finalize short pauses inside a longer Malayalam/English command.
+        pauseFor: pauseFor,
         partialResults: true,
         cancelOnError: false,  // Don't cancel on minor errors like no_match
         listenMode: ListenMode.dictation,  // Dictation keeps mic open longer

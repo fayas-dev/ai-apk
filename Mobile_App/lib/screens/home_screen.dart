@@ -44,6 +44,8 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription? _speechStateSubscription;
   Timer? _conversationTimer;
   Timer? _silenceTimer;
+  bool _wakeModeEnabled = true;
+  bool _wakeCaptureActive = false;
 
   // Track last partial text to detect "silence" when STT stalls
   String _lastPartialText = '';
@@ -76,8 +78,6 @@ class _HomeScreenState extends State<HomeScreen>
     await _ttsService.initialize();
     await _speechService.initialize();
 
-    _wsService.init();
-
     _wsStateSubscription = _wsService.connectionState.listen((status) {
       if (!mounted) return;
       setState(() {
@@ -85,7 +85,7 @@ class _HomeScreenState extends State<HomeScreen>
           if (_state == AssistantState.connecting ||
               _state == AssistantState.disconnected) {
             _state = AssistantState.connected;
-            _statusMessage = 'VPS Connected • 45.131.64.32:2004';
+            _statusMessage = 'Secure relay connected • Say “Hey Jarvis”';
           }
         } else if (status == ConnectionStateStatus.connecting) {
           _state = AssistantState.connecting;
@@ -113,6 +113,13 @@ class _HomeScreenState extends State<HomeScreen>
           _statusMessage = 'Speech recognition unavailable on this device';
         });
       } else if (status == SpeechStateStatus.done) {
+        if (_wakeModeEnabled && !_wakeCaptureActive &&
+            _state != AssistantState.listening &&
+            _state != AssistantState.processing &&
+            _state != AssistantState.speaking) {
+          _scheduleWakeRestart();
+          return;
+        }
         // STT session ended — if we have text and haven't sent yet, send it
         if (_state == AssistantState.listening &&
             !_commandSentThisSession &&
@@ -129,6 +136,9 @@ class _HomeScreenState extends State<HomeScreen>
         }
       }
     });
+
+    await _wsService.init();
+    _startWakeListening();
   }
 
   @override
@@ -175,7 +185,65 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
+    if (_wakeCaptureActive) {
+      _wakeCaptureActive = false;
+      await _speechService.stopListening();
+    }
     _start30SecondListeningSession();
+  }
+
+  void _scheduleWakeRestart() {
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) _startWakeListening();
+    });
+  }
+
+  /// Foreground wake listener. Android does not permit an ordinary app to
+  /// impersonate the system assistant in the background; a production
+  /// background hotword service needs a separately approved wake-word engine.
+  void _startWakeListening() {
+    if (!_wakeModeEnabled || _wakeCaptureActive ||
+        _state == AssistantState.listening ||
+        _state == AssistantState.processing ||
+        _state == AssistantState.speaking ||
+        !_speechService.isAvailable) return;
+
+    _wakeCaptureActive = true;
+    setState(() {
+      _statusMessage = 'Wake word ready • Say “Hey Jarvis”';
+    });
+    _speechService.startListening(
+      listenFor: const Duration(seconds: 45),
+      pauseFor: const Duration(seconds: 2),
+      onResult: (text, isFinal) {
+        if (!mounted || !_wakeCaptureActive) return;
+        final match = RegExp(r'(?:\b(?:hey|hi|hello|okay|ok)?\s*(?:jarvis|jervis)\b|ഹേയ്?\s*ജാർവിസ(?:്)?)', caseSensitive: false)
+            .firstMatch(text);
+        if (match == null) return;
+        final inlineCommand = text.substring(match.end).trim();
+        _activateWake(inlineCommand);
+      },
+    );
+  }
+
+  Future<void> _activateWake(String inlineCommand) async {
+    if (!_wakeCaptureActive) return;
+    _wakeCaptureActive = false;
+    setState(() {
+      _state = inlineCommand.isEmpty ? AssistantState.listening : AssistantState.processing;
+      _userTranscript = '';
+      _statusMessage = inlineCommand.isEmpty
+          ? 'Jarvis is listening. Speak your full command, then pause.'
+          : 'Processing command...';
+    });
+    await _speechService.stopListening();
+    if (!mounted) return;
+    if (inlineCommand.isNotEmpty) {
+      _commandSentThisSession = false;
+      _sendQueryToJarvis(inlineCommand);
+    } else {
+      _start30SecondListeningSession();
+    }
   }
 
   void _start30SecondListeningSession() {
@@ -222,7 +290,7 @@ class _HomeScreenState extends State<HomeScreen>
 
           // Reset silence detection timer on every new word
           _silenceTimer?.cancel();
-          _silenceTimer = Timer(const Duration(milliseconds: 1800), () {
+          _silenceTimer = Timer(const Duration(milliseconds: 3200), () {
             // 1.8s of silence after last word → auto-send
             if (_state == AssistantState.listening &&
                 !_commandSentThisSession &&

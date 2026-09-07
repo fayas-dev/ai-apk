@@ -14,10 +14,9 @@ import pystray
 from pystray import MenuItem as item
 
 from actions import check_and_handle_confirmation, execute_action
-from config import JARVIS_SERVER_URL, JARVIS_TTS_ENABLED, LOGO_ICO, LOGO_PNG
-from intent_engine import evaluate_local_intent, sanitize_speech_reply, query_openrouter_direct
+from config import JARVIS_ENABLE_LOCAL_DIRECT, JARVIS_SERVER_URL, JARVIS_TTS_ENABLED, LOGO_ICO, LOGO_PNG
+from intent_engine import evaluate_local_intent, sanitize_speech_reply
 from local_server import LocalDirectServer
-from qr_generator import get_local_ip
 from gui.actions_page import ActionsPage
 from gui.chat_page import ChatPage
 from gui.dashboard_page import DashboardPage
@@ -121,7 +120,7 @@ class JarvisApp(ctk.CTk):
 
         self.tts_enabled = JARVIS_TTS_ENABLED
         self.server_url = JARVIS_SERVER_URL
-        self.listening_enabled = True  # Controls whether speech listener is active
+        self.listening_enabled = True
 
         # System Tray Setup
         self.tray_icon = None
@@ -142,19 +141,24 @@ class JarvisApp(ctk.CTk):
             on_command_failed=self._on_command_failed,
             on_status_change=self._on_speech_status,
         )
-        self.local_server = LocalDirectServer(
-            port=8765,
-            on_client_connect=self._on_mobile_connected,
-            on_client_disconnect=self._on_mobile_disconnected,
-            on_remote_command=self._on_remote_event,
-            vps_forwarder=self.client.send_command,
-        )
+        self.local_server = None
+        # Direct LAN WebSockets are disabled by default because they are not
+        # TLS-encrypted. Remote access continues through the paired WSS relay.
+        if JARVIS_ENABLE_LOCAL_DIRECT:
+            self.local_server = LocalDirectServer(
+                port=8765,
+                on_client_connect=self._on_mobile_connected,
+                on_client_disconnect=self._on_mobile_disconnected,
+                on_remote_command=self._on_remote_event,
+                vps_forwarder=self.client.send_command,
+            )
 
         self._setup_layout()
 
         # Start Services
         self.client.start()
-        self.local_server.start()
+        if self.local_server:
+            self.local_server.start()
         self.listener_thread = threading.Thread(target=self.listener.listen_loop, daemon=True)
         self.listener_thread.start()
 
@@ -202,9 +206,11 @@ class JarvisApp(ctk.CTk):
         """Toggle voice listening on/off from system tray."""
         self.listening_enabled = not self.listening_enabled
         if self.listening_enabled:
+            self.listener.resume()
             self.after(0, lambda: speak_voice("Voice listening enabled", self.tts_enabled))
             self.after(0, lambda: self.pages["dashboard"].set_state("STANDBY"))
         else:
+            self.listener.pause()
             self.after(0, lambda: speak_voice("Voice listening disabled", self.tts_enabled))
             self.after(0, lambda: self.pages["dashboard"].set_state("IDLE"))
         
@@ -216,7 +222,7 @@ class JarvisApp(ctk.CTk):
         """Completely quit the application."""
         self.listener.stop()
         self.client.stop()
-        if hasattr(self, "local_server"):
+        if self.local_server:
             self.local_server.stop()
         if self.tray_icon:
             self.tray_icon.stop()
@@ -285,7 +291,7 @@ class JarvisApp(ctk.CTk):
         # Sidebar Bottom: Live VPS & Mobile Direct Badges
         self.vps_pill = ctk.CTkLabel(
             self.sidebar,
-            text="● VPS: Connecting...",
+            text="● Neural Link: Connecting...",
             font=FONT_SMALL,
             text_color=NEON_GREEN,
             fg_color="#062618",
@@ -295,10 +301,9 @@ class JarvisApp(ctk.CTk):
         )
         self.vps_pill.pack(fill="x", padx=16, pady=(0, 6))
 
-        local_ip = get_local_ip()
         self.mobile_pill = ctk.CTkLabel(
             self.sidebar,
-            text=f"📱 Direct: ws://{local_ip}:8765",
+            text="📱 Phone: Waiting for pair",
             font=FONT_SMALL,
             text_color="#00E5FF",
             fg_color="#061D26",
@@ -366,19 +371,15 @@ class JarvisApp(ctk.CTk):
             self.pages["dashboard"].set_state("STANDBY", 'Say "Hey Jarvis" or tap to speak')
             return
 
-        self._start_conversation_window(timeout=30.0)
+        self._start_conversation_window(timeout=12.0)
 
     def _on_wake_detected(self):
-        if not self.listening_enabled:  # Skip if listening is disabled
+        if not self.listening_enabled:
             return
-        self.listener.pause()
-        self.after(0, lambda: self.pages["dashboard"].set_state("LISTENING", "Wake phrase detected! Acknowledging..."))
-        # Speak synchronously so microphone does not capture "Yes, sir?" from the PC speakers
-        speak_voice_sync("Yes, sir?", self.tts_enabled)
-        import time
-        time.sleep(0.35)
-        self.listener.resume()
-        self.after(0, lambda: self.pages["dashboard"].set_state("LISTENING", "Listening for your command..."))
+        self.after(0, lambda: self.pages["dashboard"].set_state(
+            "LISTENING",
+            "Hey Jarvis — online. Speak the full command, then pause.",
+        ))
 
     def _on_command_failed(self):
         """Called when wake phrase was heard but no command followed."""
@@ -391,16 +392,15 @@ class JarvisApp(ctk.CTk):
 
     def _on_mobile_connected(self, client_ip: str):
         self.after(0, lambda: self.mobile_pill.configure(
-            text=f"📱 Phone Linked ({client_ip})",
+            text="📱 Phone: Linked (secure)",
             text_color=NEON_GREEN,
             fg_color="#062618"
         ))
-        self.after(0, lambda: self.pages["chat"].add_message("assistant", f"📱 Mobile paired directly from {client_ip} (Zero-latency active)"))
+        self.after(0, lambda: self.pages["chat"].add_message("assistant", "Mobile paired over encrypted local link."))
 
     def _on_mobile_disconnected(self, client_ip: str):
-        local_ip = get_local_ip()
         self.after(0, lambda: self.mobile_pill.configure(
-            text=f"📱 Direct: ws://{local_ip}:8765",
+            text="📱 Phone: Waiting for pair",
             text_color="#00E5FF",
             fg_color="#061D26"
         ))
@@ -416,11 +416,11 @@ class JarvisApp(ctk.CTk):
     def _on_vps_status(self, status: str):
         def _update():
             if "connected" in status.lower():
-                self.vps_pill.configure(text="● VPS: 45.131.64.32:2004", text_color=NEON_GREEN, fg_color="#062618")
+                self.vps_pill.configure(text="● Neural Link: Secure", text_color=NEON_GREEN, fg_color="#062618")
             elif "connect" in status.lower():
-                self.vps_pill.configure(text="○ VPS: Connecting...", text_color="#FFB300", fg_color="#2B2005")
+                self.vps_pill.configure(text="○ Neural Link: Connecting...", text_color="#FFB300", fg_color="#2B2005")
             else:
-                self.vps_pill.configure(text="○ VPS: Offline", text_color=NEON_RED, fg_color="#2E0A12")
+                self.vps_pill.configure(text="○ Neural Link: Offline", text_color=NEON_RED, fg_color="#2E0A12")
         self.after(0, _update)
 
     def _on_speech_status(self, status: str):
@@ -474,22 +474,11 @@ class JarvisApp(ctk.CTk):
                 self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
                 return
 
-            # Step 4: Instant Direct OpenRouter AI Fallback
-            direct_ai = query_openrouter_direct(command_text)
-            if direct_ai and direct_ai.get("success"):
-                action_name = direct_ai.get("action", "speak")
-                target = direct_ai.get("target")
-                speech_reply = direct_ai.get("speech", "")
-                action_log = None
-                if action_name != "speak":
-                    success, action_log = execute_action(action_name, target)
-
-                self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
-                return
-
-            # Step 5: Safe local fallback
-            fallback_speech = f"Command recognized, sir. Executing '{command_text}' on local system."
-            self.after(0, lambda: self._finalize_action("speak", fallback_speech, "Processed locally"))
+            # Step 4: Do not execute arbitrary local text as a fallback. The
+            # action registry or authenticated relay must explicitly authorize it.
+            self.after(0, lambda: self._finalize_action(
+                "speak", "I could not reach the secure neural relay. Please reconnect and try again.", None
+            ))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -511,11 +500,10 @@ class JarvisApp(ctk.CTk):
         def _speak_and_resume():
             if self.tts_enabled:
                 speak_voice_sync(speech_text, True, timeout=20.0)
-            # Brief pause for speaker echo dissipation
             import time
-            time.sleep(0.35)
+            time.sleep(0.45)
             self.listener.resume()
-            self.after(0, lambda: self._start_conversation_window(timeout=25.0))
+            self.after(0, lambda: self._start_conversation_window(timeout=12.0))
 
         threading.Thread(target=_speak_and_resume, daemon=True).start()
 
@@ -536,7 +524,7 @@ class JarvisApp(ctk.CTk):
 
         self.pages["dashboard"].set_state(
             "LISTENING",
-            "Active Conversation (30s) — Speak directly without 'Hey Jarvis'"
+            "Follow-up window — finish the full command, then pause",
         )
 
         def _session_worker():
@@ -551,7 +539,7 @@ class JarvisApp(ctk.CTk):
                 self._active_conversation = False
                 self.after(0, lambda: self.pages["dashboard"].set_state(
                     "STANDBY",
-                    'Session closed (30s timeout). Say "Hey Jarvis" or tap to speak.'
+                    'Say "Hey Jarvis" whenever you are ready.',
                 ))
 
         threading.Thread(target=_session_worker, daemon=True).start()
@@ -567,9 +555,14 @@ class JarvisApp(ctk.CTk):
         self.client.start()
 
     def _on_save_settings(self, new_url: str, tts_on: bool, speed: int):
+        global _tts_speed
         self.tts_enabled = tts_on
-        if _tts_engine:
-            _tts_engine.setProperty("rate", speed)
+        _tts_speed = speed
+        if _tts_engine_ref:
+            try:
+                _tts_engine_ref.setProperty("rate", speed)
+            except Exception:
+                pass
         speak_voice("Settings updated and applied successfully.", self.tts_enabled)
 
 

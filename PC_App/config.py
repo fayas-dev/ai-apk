@@ -1,42 +1,35 @@
 """
 Jarvis PC Client - Centralized Configuration
-Contains all environment settings, paths, server URL, and constants.
+Secrets stay in environment variables. UI never displays IPs or API keys.
 """
 
 import os
 from pathlib import Path
 
-# Base Paths (Independent of Current Working Directory)
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR.parent / ".env")
+
 IMAGES_DIR = BASE_DIR / "images"
 LOGO_PNG = IMAGES_DIR / "logo.png"
 LOGO_ICO = IMAGES_DIR / "logo.ico"
 
-# VPS Server WebSocket URL (Single source of truth)
-# Default is the dedicated VPS at 45.131.64.32:2004
-JARVIS_SERVER_URL = os.getenv(
-    "JARVIS_SERVER", "ws://45.131.64.32:2004/ws/jarvis"
-).strip()
+# No production address is compiled into the desktop client. Configure a WSS
+# endpoint privately in .env / the operating-system environment.
+JARVIS_SERVER_URL = os.getenv("JARVIS_SERVER", "").strip()
+JARVIS_DEVICE_TOKEN = os.getenv("JARVIS_DEVICE_TOKEN", "").strip()
+JARVIS_ENABLE_LOCAL_DIRECT = os.getenv("JARVIS_ENABLE_LOCAL_DIRECT", "false").strip().lower() in ("1", "true", "yes")
 
-# Text-To-Speech Configuration
 JARVIS_TTS_ENABLED = (
     os.getenv("JARVIS_TTS", "true").strip().lower() in ("true", "1", "yes")
 )
 
-# Speech Recognition & Wake Phrase Detection
-WAKE_PHRASES = [
-    "hey jarvis",
-    "okay jarvis",
-    "ok jarvis",
-    "hello jarvis",
-    "hi jarvis",
-    "jarvis",
-    "jervis",
-    "travis",
-]
-
-# Client Metadata
 CLIENT_TYPE = "pc"
-RECONNECT_INITIAL_DELAY = 2.0  # seconds
-RECONNECT_MAX_DELAY = 30.0    # seconds
-REQUEST_TIMEOUT = 25.0         # seconds
+RECONNECT_INITIAL_DELAY = 2.0
+RECONNECT_MAX_DELAY = 30.0
+REQUEST_TIMEOUT = 25.0
+
+# Keep WAKE_PHRASES for any callers; matching lives in wake_phrase.py
+from wake_phrase import WAKE_PHRASES  # noqa: E402

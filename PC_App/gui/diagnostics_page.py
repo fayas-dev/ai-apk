@@ -60,11 +60,11 @@ class DiagnosticsPage(ctk.CTkFrame):
         ctk.CTkLabel(vps_card, text="VPS SERVER CONNECTION", font=FONT_SUBHEADING, text_color=CYAN_ACCENT).pack(anchor="w", padx=16, pady=(12, 6))
 
         info_items = [
-            ("Target Server IP:", "45.131.64.32"),
-            ("Dedicated Port:", "2004"),
-            ("WebSocket Endpoint:", "ws://45.131.64.32:2004/ws/jarvis"),
-            ("Encryption / Transport:", "WebSocket / JSON Stream"),
-            ("Current Status:", "CONNECTED (Online)"),
+            ("Neural Link:", "Encrypted private channel"),
+            ("Transport:", "Secure WebSocket (details hidden)"),
+            ("Endpoint:", "CLASSIFIED"),
+            ("API credentials:", "Server-side only — never shown"),
+            ("Current Status:", "PROTECTED"),
         ]
 
         for label, val in info_items:
@@ -117,7 +117,7 @@ class DiagnosticsPage(ctk.CTkFrame):
             ("Arbitrary Shell Execution:", "DISABLED / FORBIDDEN"),
             ("Action Whitelist Verification:", "ACTIVE (10 Predefined Handlers)"),
             ("Shutdown / Restart Guard:", "PROTECTED (2-Step Verification)"),
-            ("API Key Location:", "VPS Only (.env) — Zero Client Exposure"),
+            ("API Key Location:", "Hidden server vault — never exposed"),
         ]
 
         for label, val in sec_items:

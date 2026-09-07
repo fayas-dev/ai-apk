@@ -391,11 +391,8 @@ async function startServer() {
       activeMobileClients: connectedMobileClients.size,
       activeWebClients: connectedWebClients.size,
       uptime: Math.floor((Date.now() - startTime) / 1000),
-      hasGemini: !!process.env.GEMINI_API_KEY,
-      hasOpenRouter: !!process.env.OPENROUTER_API_KEY,
-      aiModel: process.env.GEMINI_API_KEY
-        ? 'gemini-2.5-flash'
-        : process.env.OPENROUTER_MODEL || 'Mark VII Built-in Core',
+      hasNeuralCore: !!(process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY),
+      aiModel: 'JARVIS Mark VII Neural Core',
     });
   });
 

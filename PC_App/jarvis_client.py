@@ -1,6 +1,6 @@
 """
 Jarvis PC Client - WebSocket Client & Remote Control Listener
-Maintains persistent connection to the VPS at ws://45.131.64.32:2004/ws/jarvis
+Maintains a persistent authenticated connection to the private WSS relay.
 Handles automatic reconnects, request UUIDs, and executes incoming remote control events.
 """
 
@@ -16,6 +16,7 @@ from websockets.exceptions import ConnectionClosed
 
 from config import (
     CLIENT_TYPE,
+    JARVIS_DEVICE_TOKEN,
     JARVIS_SERVER_URL,
     RECONNECT_INITIAL_DELAY,
     RECONNECT_MAX_DELAY,
@@ -30,10 +31,12 @@ class JarvisClient:
     def __init__(
         self,
         server_url: str = JARVIS_SERVER_URL,
+        device_token: str = JARVIS_DEVICE_TOKEN,
         on_status_change: Optional[Callable[[str], None]] = None,
         on_remote_event: Optional[Callable[[Dict[str, Any]], None]] = None,
     ):
         self.server_url = server_url
+        self.device_token = device_token
         self.on_status_change = on_status_change
         self.on_remote_event = on_remote_event
         self.is_connected = False
@@ -68,6 +71,10 @@ class JarvisClient:
     async def _connection_manager(self):
         retry_delay = RECONNECT_INITIAL_DELAY
         while self._running:
+            if not self.server_url or not self.device_token:
+                self._notify_status("Secure relay not configured")
+                await asyncio.sleep(RECONNECT_MAX_DELAY)
+                continue
             try:
                 self._notify_status("Connecting to VPS...")
                 logger.info("Connecting to Jarvis VPS at %s", self.server_url)
@@ -89,6 +96,7 @@ class JarvisClient:
                         "type": "register",
                         "client": "pc",
                         "pc_name": "Fayas-PC",
+                        "pairing_token": self.device_token,
                     }))
 
                     await self._receive_loop(ws)
@@ -134,7 +142,9 @@ class JarvisClient:
                         except Exception:
                             pass
 
-                    # If screen was requested, relay screen base64 back to mobile
+                    # Relay the result for every authenticated remote action.
+                    # This includes microphone-transcription and speaker control
+                    # acknowledgements as well as screen frames.
                     if data.get("command") in ("get_screen", "view_pc_screen") and res.get("screen"):
                         screen_reply = {
                             "type": "remote_pc_response",
@@ -142,6 +152,12 @@ class JarvisClient:
                             "screen": res["screen"],
                         }
                         await ws.send(json.dumps(screen_reply))
+                    else:
+                        await ws.send(json.dumps({
+                            "type": "remote_pc_response",
+                            "command": data.get("command", ""),
+                            "result": res,
+                        }))
                     continue
 
                 logger.info("Received VPS broadcast: %s", data)

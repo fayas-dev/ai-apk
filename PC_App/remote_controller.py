@@ -241,9 +241,22 @@ class RemoteController:
             "search_web",
             "open_url_in_chrome",
             "search_and_open_app",
+            "open_file_explorer",
+            "open_settings",
+            "search_and_open",
+            "volume_up",
+            "volume_down",
+            "volume_mute",
+            "media_play_pause",
+            "media_next",
+            "media_previous",
+            "take_screenshot",
+            "minimize_windows",
+            "speak_on_speakers",
+            "capture_pc_mic",
         ):
             from actions import execute_action
-            success, msg = execute_action(cmd, command_data.get("target"))
+            success, msg = execute_action(cmd, command_data.get("target") or command_data.get("text"))
             return {"status": "ok" if success else "error", "message": msg}
 
         return {"status": "error", "message": f"Unknown command: {cmd}"}

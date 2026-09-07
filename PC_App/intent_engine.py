@@ -6,31 +6,11 @@ Owner: Muhammad Fayas (Fayas), born 21/03/2010, Kaipamangalam Thainagar, Thrissu
 """
 
 import datetime
-import json
 import logging
-import os
 import re
-import urllib.error
-import urllib.request
-from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
-from dotenv import load_dotenv
 
 logger = logging.getLogger("JarvisIntent")
-
-# Load .env variables from PC_App directory or root directory
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
-load_dotenv(BASE_DIR.parent / ".env")
-
-OPENROUTER_API_KEY = os.getenv(
-    "OPENROUTER_API_KEY",
-    "",
-).strip()
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip()
-OPENROUTER_BASE_URL = os.getenv(
-    "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions"
-).strip()
 
 OWNER_NAME = "Muhammad Fayas"
 OWNER_NICKNAME = "Fayas"
@@ -82,6 +62,12 @@ ALLOWED ACTION NAMES:
 8. "lock_pc" - To lock the Windows screen. (target: null)
 9. "shutdown_pc" - When the user asks to shut down the PC. (target: null)
 10. "restart_pc" - When the user asks to restart the PC. (target: null)
+11. "volume_up" / "volume_down" / "volume_mute"
+12. "media_play_pause" / "media_next" / "media_previous"
+13. "take_screenshot" / "minimize_windows"
+14. "speak_on_speakers" (target: text for PC speakers)
+15. "capture_pc_mic"
+Never mention OpenRouter, API keys, server IPs, or model names. Execute any reasonable PC request with the closest action.
 """
 
 
@@ -244,6 +230,23 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
         }
 
     # 10. Open Settings
+    if re.search(r"\b(volume up|increase volume|louder|ശബ്ദം കൂട്ടുക)\b", clean):
+        return {"success": True, "action": "volume_up", "target": None, "speech": "Turning the volume up, sir."}
+    if re.search(r"\b(volume down|decrease volume|quieter|ശബ്ദം കുറയ്ക്കുക)\b", clean):
+        return {"success": True, "action": "volume_down", "target": None, "speech": "Turning the volume down, sir."}
+    if re.search(r"\b(mute|unmute|നിശബ്ദം)\b", clean):
+        return {"success": True, "action": "volume_mute", "target": None, "speech": "Toggling mute, sir."}
+    if re.search(r"\b(play music|pause music|play pause|pause playback)\b", clean):
+        return {"success": True, "action": "media_play_pause", "target": None, "speech": "Toggling playback, sir."}
+    if re.search(r"\b(next (song|track)|skip)\b", clean):
+        return {"success": True, "action": "media_next", "target": None, "speech": "Skipping to the next track, sir."}
+    if re.search(r"\b(previous (song|track)|go back)\b", clean):
+        return {"success": True, "action": "media_previous", "target": None, "speech": "Going to the previous track, sir."}
+    if re.search(r"\b(screenshot|take a screenshot|സ്ക്രീൻഷോട്ട്)\b", clean):
+        return {"success": True, "action": "take_screenshot", "target": None, "speech": "Capturing a screenshot, sir."}
+    if re.search(r"\b(show desktop|minimize all|minimise all)\b", clean):
+        return {"success": True, "action": "minimize_windows", "target": None, "speech": "Showing the desktop, sir."}
+
     if re.search(r"\b(open settings|system settings|windows settings)\b", clean):
         return {
             "success": True,
@@ -322,69 +325,9 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
 
 
 def query_openrouter_direct(query: str) -> Optional[Dict[str, Any]]:
+    """Compatibility stub: AI calls are deliberately VPS-only.
+
+    Keeping provider credentials out of desktop and mobile packages prevents a
+    copied app or a lost computer from exposing the server-side AI credential.
     """
-    Direct OpenRouter LLM Query Fallback.
-    Ensures Jarvis can answer any complex questions, conversational queries, or calculations
-    even if the VPS server is offline or experiencing network latency.
-    """
-    if not OPENROUTER_API_KEY:
-        return None
-
-    try:
-        headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://jarvis-ai.local",
-            "X-Title": "Jarvis AI Desktop",
-        }
-        payload = {
-            "model": OPENROUTER_MODEL,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": query},
-            ],
-            "temperature": 0.4,
-            "max_tokens": 400,
-        }
-
-        req = urllib.request.Request(
-            OPENROUTER_BASE_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-
-        with urllib.request.urlopen(req, timeout=12) as response:
-            raw_data = json.loads(response.read().decode("utf-8"))
-            content = raw_data["choices"][0]["message"]["content"].strip()
-
-            # Attempt to parse structured JSON from LLM
-            clean_content = content
-            if "```json" in clean_content:
-                clean_content = clean_content.split("```json")[1].split("```")[0].strip()
-            elif "```" in clean_content:
-                clean_content = clean_content.split("```")[1].split("```")[0].strip()
-
-            try:
-                parsed = json.loads(clean_content)
-                action = parsed.get("action", "speak")
-                target = parsed.get("target")
-                speech = sanitize_speech_reply(parsed.get("speech", ""))
-                return {
-                    "success": True,
-                    "action": action,
-                    "target": target,
-                    "speech": speech,
-                }
-            except Exception:
-                speech = sanitize_speech_reply(content)
-                return {
-                    "success": True,
-                    "action": "speak",
-                    "target": None,
-                    "speech": speech,
-                }
-
-    except Exception as e:
-        logger.error("Direct OpenRouter call failed: %s", e)
-        return None
+    return None

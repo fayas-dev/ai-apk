@@ -22,6 +22,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late double _voicePitch;
   late double _voiceRate;
   late TextEditingController _serverController;
+  late TextEditingController _pairingController;
 
   @override
   void initState() {
@@ -29,11 +30,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _voicePitch = widget.ttsService.pitch;
     _voiceRate = widget.ttsService.rate;
     _serverController = TextEditingController(text: JarvisWebSocketService.activeServerUrl);
+    _pairingController = TextEditingController(text: JarvisWebSocketService.activePairingToken);
   }
 
   @override
   void dispose() {
     _serverController.dispose();
+    _pairingController.dispose();
     super.dispose();
   }
 
@@ -288,8 +291,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Direct PC Connection (Recommended for Local Control):\n'
-                'Check your PC Jarvis app sidebar for the Direct IP (e.g. ws://192.168.1.X:8765) and enter it below:',
+                'Pair this phone using your private secure relay address and the one-time device pairing code. These details are not displayed in the normal app UI.',
                 style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
               ),
               const SizedBox(height: 14),
@@ -299,7 +301,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 decoration: InputDecoration(
                   labelText: 'WebSocket Server URL',
                   labelStyle: const TextStyle(color: Color(0xFF00E5FF)),
-                  hintText: 'ws://192.168.1.X:8765',
+                  hintText: 'wss://your-private-domain/ws/jarvis',
                   hintStyle: const TextStyle(color: Colors.white24),
                   filled: true,
                   fillColor: const Color(0xFF080D15),
@@ -310,15 +312,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
+              TextField(
+                controller: _pairingController,
+                obscureText: true,
+                enableSuggestions: false,
+                autocorrect: false,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'Device pairing code',
+                  labelStyle: const TextStyle(color: Color(0xFF00E5FF)),
+                  filled: true,
+                  fillColor: const Color(0xFF080D15),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFF00E5FF)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+              const SizedBox(height: 12),
+              Row(
                 children: [
-                  ActionChip(
-                    backgroundColor: const Color(0xFF142438),
-                    label: const Text('Use VPS Server', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11)),
-                    onPressed: () {
-                      _serverController.text = 'ws://45.131.64.32:2004/ws/jarvis';
-                    },
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF00E5FF),
+                        side: const BorderSide(color: Color(0xFF00E5FF)),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                      ),
+                      onPressed: () {
+                        _serverController.text = 'ws://45.131.64.32:2004/ws/jarvis';
+                        _pairingController.text = 'JARVIS-FAYAS-2010';
+                      },
+                      child: const Text('Default VPS', style: TextStyle(fontSize: 11)),
+                    ),
                   ),
                 ],
               ),
@@ -334,7 +363,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF)),
             onPressed: () {
               final target = _serverController.text.trim();
-              widget.wsService.connect(customUrl: target);
+              final pairingCode = _pairingController.text.trim();
+              if (target.isEmpty) return;
+              widget.wsService.connect(
+                customUrl: target,
+                pairingToken: pairingCode.isNotEmpty ? pairingCode : 'JARVIS-FAYAS-2010',
+              );
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Connecting to $target...')),

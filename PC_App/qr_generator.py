@@ -5,7 +5,6 @@ Generates a visual QR code image for Mobile-to-PC pairing.
 
 import json
 import os
-import socket
 from pathlib import Path
 
 import qrcode
@@ -15,38 +14,19 @@ BASE_DIR = Path(__file__).resolve().parent
 QR_CACHE_PATH = BASE_DIR / "images" / "pairing_qr.png"
 
 
-def get_local_ip() -> str:
-    """Retrieves current PC local network IP."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
-
-
 def generate_pairing_qr_code(
-    vps_url: str = "ws://45.131.64.32:2004/ws/jarvis",
+    vps_url: str = "",
     pair_id: str = "JARVIS-FAYAS-2010",
 ) -> str:
     """
     Generates a QR code containing pairing configuration and saves to images/pairing_qr.png.
     Returns the absolute path to the generated image.
     """
-    local_ip = get_local_ip()
-    hostname = socket.gethostname()
-
-    local_ws = f"ws://{local_ip}:8765"
+    # The QR is deliberately metadata only. It contains no LAN IP, VPS IP,
+    # port, or credential; pairing details are entered privately on the phone.
     pairing_data = {
         "app": "JARVIS",
         "version": "2.0",
-        "local_ws": local_ws,
-        "local_ip": local_ip,
-        "port": 8765,
-        "vps": vps_url,
-        "pc_name": hostname,
         "owner": "Muhammad Fayas",
         "pair_id": pair_id,
     }

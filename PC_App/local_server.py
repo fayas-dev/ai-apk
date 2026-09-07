@@ -7,6 +7,7 @@ and direct voice/chat command processing.
 """
 
 import asyncio
+import hmac
 import json
 import logging
 import threading
@@ -15,8 +16,8 @@ from typing import Any, Callable, Dict, Optional, Set
 import websockets
 
 from actions import execute_action
-from intent_engine import evaluate_local_intent, sanitize_speech_reply, query_openrouter_direct
-from qr_generator import get_local_ip
+from config import JARVIS_DEVICE_TOKEN
+from intent_engine import evaluate_local_intent, sanitize_speech_reply
 from remote_controller import RemoteController
 
 logger = logging.getLogger("JarvisLocalServer")
@@ -30,12 +31,14 @@ class LocalDirectServer:
         on_client_disconnect: Optional[Callable[[str], None]] = None,
         on_remote_command: Optional[Callable[[Dict[str, Any]], None]] = None,
         vps_forwarder: Optional[Callable[[str], Dict[str, Any]]] = None,
+        device_token: str = JARVIS_DEVICE_TOKEN,
     ):
         self.port = port
         self.on_client_connect = on_client_connect
         self.on_client_disconnect = on_client_disconnect
         self.on_remote_command = on_remote_command
         self.vps_forwarder = vps_forwarder
+        self.device_token = device_token
 
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -67,12 +70,7 @@ class LocalDirectServer:
                 ping_timeout=20,
             ) as server:
                 self._server = server
-                logger.info(
-                    "Jarvis Direct Local Server running on ws://%s:%d and ws://0.0.0.0:%d",
-                    get_local_ip(),
-                    self.port,
-                    self.port,
-                )
+                logger.info("Jarvis Direct Local Server started with paired-device access only")
                 while self._running:
                     await asyncio.sleep(1)
         except Exception as e:
@@ -80,7 +78,23 @@ class LocalDirectServer:
 
     async def _handler(self, websocket):
         client_ip = websocket.remote_address[0]
-        logger.info("Mobile device connected from %s", client_ip)
+        # A LAN address is not a security boundary.  Pair before exposing any
+        # remote-control capability.
+        if not self.device_token:
+            await websocket.close(code=1008, reason="Pairing is not configured")
+            return
+        try:
+            raw_auth = await asyncio.wait_for(websocket.recv(), timeout=10)
+            auth = json.loads(raw_auth)
+            supplied = str(auth.get("pairing_token", ""))
+            if auth.get("type") != "register" or not hmac.compare_digest(supplied, self.device_token):
+                await websocket.close(code=1008, reason="Pairing failed")
+                return
+        except (asyncio.TimeoutError, json.JSONDecodeError, websockets.ConnectionClosed):
+            await websocket.close(code=1008, reason="Pairing required")
+            return
+
+        logger.info("Paired mobile device connected")
         self.connected_clients.add(websocket)
         if self.on_client_connect:
             try:
@@ -92,9 +106,8 @@ class LocalDirectServer:
         try:
             await websocket.send(
                 json.dumps({
-                    "type": "welcome",
+                    "type": "pong",
                     "server": "JARVIS-Direct-PC",
-                    "owner": "Muhammad Fayas",
                     "status": "connected",
                 })
             )
@@ -196,7 +209,9 @@ class LocalDirectServer:
                 )
                 return
 
-            # Forward to VPS if available
+            # Forward to the private VPS relay if available. The desktop never
+            # falls back to a provider API locally, so its credentials stay on
+            # the server only.
             response = None
             if self.vps_forwarder:
                 try:
@@ -222,35 +237,16 @@ class LocalDirectServer:
                     })
                 )
             else:
-                # Direct OpenRouter fallback
-                direct_ai = query_openrouter_direct(text)
-                if direct_ai and direct_ai.get("success"):
-                    action_name = direct_ai.get("action", "speak")
-                    target = direct_ai.get("target")
-                    if action_name != "speak":
-                        execute_action(action_name, target)
-
-                    await ws.send(
-                        json.dumps({
-                            "type": "response",
-                            "request_id": request_id,
-                            "success": True,
-                            "action": action_name,
-                            "target": target,
-                            "speech": direct_ai["speech"],
-                        })
-                    )
-                else:
-                    await ws.send(
-                        json.dumps({
-                            "type": "response",
-                            "request_id": request_id,
-                            "success": True,
-                            "action": "speak",
-                            "target": None,
-                            "speech": "Command received and processed, sir.",
-                        })
-                    )
+                await ws.send(
+                    json.dumps({
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": False,
+                        "action": "speak",
+                        "target": None,
+                        "speech": "The secure neural relay is unavailable. Please reconnect and try again.",
+                    })
+                )
             return
 
     def stop(self):

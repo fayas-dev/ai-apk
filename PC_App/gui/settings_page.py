@@ -83,7 +83,7 @@ class SettingsPage(ctk.CTkFrame):
         ctk.CTkLabel(qr_card, text="📱 MOBILE DEVICE QR CODE PAIRING", font=FONT_SUBHEADING, text_color=CYAN_ACCENT).pack(anchor="w", padx=16, pady=(14, 4))
         ctk.CTkLabel(
             qr_card,
-            text="Scan this QR code with the Jarvis Mobile App to connect your phone for remote PC control, trackpad, and screen streaming.",
+            text="Scan to identify this PC, then enter the private relay address and pairing code on your phone. Network addresses and credentials are not displayed here.",
             font=FONT_SMALL,
             text_color=TEXT_SECONDARY,
             wraplength=600,
@@ -147,29 +147,23 @@ class SettingsPage(ctk.CTkFrame):
             command=lambda: self.on_test_voice("All neural systems and voice channels are calibrated and operational, sir."),
         ).pack(anchor="w", padx=16, pady=(8, 14))
 
-        # 4. Server Settings Card
+        # 4. Server Settings Card (no IP / URL displayed)
         server_card = ctk.CTkFrame(content, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER_COLOR)
         server_card.pack(fill="x", pady=8)
 
-        ctk.CTkLabel(server_card, text="CENTRALIZED VPS SERVER", font=FONT_SUBHEADING, text_color=CYAN_ACCENT).pack(anchor="w", padx=16, pady=(14, 8))
-        ctk.CTkLabel(server_card, text="WebSocket Endpoint URL:", font=FONT_SMALL, text_color=TEXT_SECONDARY).pack(anchor="w", padx=16, pady=(4, 2))
-
-        self.server_entry = ctk.CTkEntry(
+        ctk.CTkLabel(server_card, text="SECURE NEURAL LINK", font=FONT_SUBHEADING, text_color=CYAN_ACCENT).pack(anchor="w", padx=16, pady=(14, 8))
+        ctk.CTkLabel(
             server_card,
-            font=FONT_BODY,
-            text_color=TEXT_PRIMARY,
-            fg_color="#060A10",
-            border_width=1,
-            border_color=BORDER_COLOR,
-            height=38,
-        )
-        self.server_entry.insert(0, self.current_server)
-        self.server_entry.pack(fill="x", padx=16, pady=(0, 10))
+            text="Server address, ports, and API keys are stored privately and never shown on screen. Pair the phone with the QR code above.",
+            font=FONT_SMALL,
+            text_color=TEXT_SECONDARY,
+            wraplength=620,
+        ).pack(anchor="w", padx=16, pady=(0, 10))
 
         # Save Button
         ctk.CTkButton(
             server_card,
-            text="💾 Save & Apply Settings",
+            text="💾 Save Voice Settings",
             font=FONT_BODY_BOLD,
             fg_color=CYAN_ACCENT,
             hover_color=CYAN_HOVER,
@@ -180,7 +174,6 @@ class SettingsPage(ctk.CTkFrame):
         ).pack(anchor="w", padx=16, pady=(0, 16))
 
     def _handle_save(self):
-        new_url = self.server_entry.get().strip()
         tts_enabled = self.tts_switch.get() == 1
         speed = int(self.speed_slider.get())
-        self.on_save_settings(new_url, tts_enabled, speed)
+        self.on_save_settings(self.current_server, tts_enabled, speed)

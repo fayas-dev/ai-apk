@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import webbrowser
+from pathlib import Path
 from urllib.parse import quote_plus
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -347,6 +348,110 @@ def speak(target: Optional[str] = None) -> Tuple[bool, str]:
     return True, "Completed."
 
 
+def _media_key(key: str) -> Tuple[bool, str]:
+    try:
+        import pyautogui
+        pyautogui.press(key)
+        return True, f"Media key {key} sent."
+    except Exception as e:
+        return False, str(e)
+
+
+def volume_up(target: Optional[str] = None) -> Tuple[bool, str]:
+    steps = 4
+    try:
+        steps = max(1, min(int(target or 4), 12))
+    except ValueError:
+        steps = 4
+    for _ in range(steps):
+        _media_key("volumeup")
+    return True, "Volume increased."
+
+
+def volume_down(target: Optional[str] = None) -> Tuple[bool, str]:
+    steps = 4
+    try:
+        steps = max(1, min(int(target or 4), 12))
+    except ValueError:
+        steps = 4
+    for _ in range(steps):
+        _media_key("volumedown")
+    return True, "Volume decreased."
+
+
+def volume_mute(target: Optional[str] = None) -> Tuple[bool, str]:
+    return _media_key("volumemute")
+
+
+def media_play_pause(target: Optional[str] = None) -> Tuple[bool, str]:
+    return _media_key("playpause")
+
+
+def media_next(target: Optional[str] = None) -> Tuple[bool, str]:
+    return _media_key("nexttrack")
+
+
+def media_previous(target: Optional[str] = None) -> Tuple[bool, str]:
+    return _media_key("prevtrack")
+
+
+def take_screenshot(target: Optional[str] = None) -> Tuple[bool, str]:
+    try:
+        import pyautogui
+        pictures = Path(os.path.expanduser("~")) / "Pictures"
+        pictures.mkdir(parents=True, exist_ok=True)
+        dest = pictures / f"jarvis_screenshot_{int(__import__('time').time())}.png"
+        pyautogui.screenshot(str(dest))
+        return True, f"Screenshot saved to {dest.name}."
+    except Exception as e:
+        return False, f"Screenshot failed: {e}"
+
+
+def minimize_windows(target: Optional[str] = None) -> Tuple[bool, str]:
+    try:
+        import pyautogui
+        pyautogui.hotkey("win", "d")
+        return True, "Desktop shown."
+    except Exception as e:
+        return False, str(e)
+
+
+def speak_on_speakers(target: Optional[str] = None) -> Tuple[bool, str]:
+    text = (target or "").strip()
+    if not text:
+        return False, "No speech text provided."
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        engine.setProperty("rate", 185)
+        engine.say(text)
+        engine.runAndWait()
+        return True, "Spoken on PC speakers."
+    except Exception as e:
+        return False, f"Speaker playback failed: {e}"
+
+
+def capture_pc_mic(target: Optional[str] = None) -> Tuple[bool, str]:
+    """Listen on the PC microphone and return recognized text."""
+    try:
+        import speech_recognition as sr
+        recognizer = sr.Recognizer()
+        recognizer.pause_threshold = 1.2
+        with sr.Microphone() as source:
+            recognizer.adjust_for_ambient_noise(source, duration=0.4)
+            audio = recognizer.listen(source, timeout=8, phrase_time_limit=12)
+        for lang in ("en-IN", "ml-IN", "en-US"):
+            try:
+                text = recognizer.recognize_google(audio, language=lang)
+                if text:
+                    return True, text
+            except Exception:
+                continue
+        return False, "Could not understand the PC microphone."
+    except Exception as e:
+        return False, f"PC microphone failed: {e}"
+
+
 # Safe Whitelist Registry
 ACTION_REGISTRY: Dict[str, Callable[[Optional[str]], Tuple[bool, str]]] = {
     "speak": speak,
@@ -363,6 +468,16 @@ ACTION_REGISTRY: Dict[str, Callable[[Optional[str]], Tuple[bool, str]]] = {
     "search_web": search_web,
     "open_url_in_chrome": open_url_in_chrome,
     "search_and_open_app": search_and_open_app,
+    "volume_up": volume_up,
+    "volume_down": volume_down,
+    "volume_mute": volume_mute,
+    "media_play_pause": media_play_pause,
+    "media_next": media_next,
+    "media_previous": media_previous,
+    "take_screenshot": take_screenshot,
+    "minimize_windows": minimize_windows,
+    "speak_on_speakers": speak_on_speakers,
+    "capture_pc_mic": capture_pc_mic,
 }
 
 

@@ -1,11 +1,10 @@
 """
 Jarvis VPS - Central AI Server & Device Relay
-Listens on: 0.0.0.0:2004
-WebSocket Endpoint: /ws/jarvis
-External URL: ws://45.131.64.32:2004/ws/jarvis
+Bind address and AI keys come from environment variables only.
 """
 
 import json
+import hmac
 import logging
 import os
 import re
@@ -36,6 +35,17 @@ OPENROUTER_BASE_URL = os.getenv(
 ).strip()
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0").strip()
 SERVER_PORT = int(os.getenv("SERVER_PORT", "2004"))
+# Comma-separated device credentials.  Set this only in the private VPS .env;
+# connections are rejected when it is not configured.
+DEVICE_TOKENS = frozenset(
+    token.strip() for token in os.getenv("JARVIS_DEVICE_TOKENS", "").split(",") if token.strip()
+)
+
+
+def is_valid_device_token(value: object) -> bool:
+    if not DEVICE_TOKENS or not isinstance(value, str):
+        return False
+    return any(hmac.compare_digest(value, token) for token in DEVICE_TOKENS)
 
 # Logging Setup
 LOG_FILE = LOGS_DIR / "jarvis_vps.log"
@@ -66,7 +76,20 @@ ALLOWED_ACTIONS = {
     "restart_pc",
     "view_pc_screen",
     "mouse_control",
-    "keyboard_control",
+    "volume_up",
+    "volume_down",
+    "volume_mute",
+    "media_play_pause",
+    "media_next",
+    "media_previous",
+    "take_screenshot",
+    "minimize_windows",
+    "speak_on_speakers",
+    "capture_pc_mic",
+    "search_web",
+    "open_url_in_chrome",
+    "search_and_open_app",
+    "search_and_open",
 }
 
 # Jarvis AI System Prompt with Owner Persona & Strict Identity
@@ -109,7 +132,15 @@ ALLOWED ACTION NAMES:
 13. "restart_pc" - When user asks to restart the computer. (target: null, speech: "Are you sure you want to restart your computer?")
 14. "view_pc_screen" - When user asks to see or view their PC screen on mobile. (target: null, speech: "Streaming your PC screen now, sir.")
 15. "mouse_control" - To activate virtual mouse / trackpad control. (target: null, speech: "Mouse trackpad active.")
-16. "keyboard_control" - To activate virtual keyboard control. (target: null, speech: "Virtual keyboard ready.")
+17. "volume_up" / "volume_down" / "volume_mute"
+18. "media_play_pause" / "media_next" / "media_previous"
+19. "take_screenshot" / "minimize_windows"
+20. "speak_on_speakers" - Speak through PC speakers (target: text)
+21. "capture_pc_mic" - Capture speech from the PC microphone
+22. "search_web" / "open_url_in_chrome" / "search_and_open_app"
+
+If the user is on mobile and asks to control the PC, always pick a PC action.
+Never mention OpenRouter, OpenAI, API keys, IP addresses, ports, or model names.
 
 EXAMPLES:
 User: "Open YouTube"
@@ -139,15 +170,13 @@ connected_mobile_clients: Set[WebSocket] = set()
 async def lifespan(application: FastAPI):
     """Modern FastAPI lifespan handler."""
     logger.info("Jarvis VPS starting...")
-    logger.info("Server listening on %s:%s", SERVER_HOST, SERVER_PORT)
-    logger.info("External WebSocket endpoint: ws://45.131.64.32:2004/ws/jarvis")
+    logger.info("Server listening on configured bind address")
     if not OPENROUTER_API_KEY or OPENROUTER_API_KEY.startswith("YOUR_"):
-        logger.warning(
-            "OPENROUTER_API_KEY is not set or using placeholder! Please update .env"
-        )
+        logger.warning("Neural core key is not configured. Update server environment.")
     else:
-        logger.info("AI Service key loaded successfully (length: %d)", len(OPENROUTER_API_KEY))
-    logger.info("Configured AI model: %s", OPENROUTER_MODEL)
+        logger.info("Neural core credentials loaded")
+    if not DEVICE_TOKENS:
+        logger.error("No paired-device credentials configured; all connections will be rejected.")
     yield
     logger.info("Jarvis VPS shutting down.")
 
@@ -172,12 +201,10 @@ app.add_middleware(
 async def root():
     return {
         "status": "online",
-        "service": "Jarvis VPS Server & Device Relay",
+        "service": "Jarvis Neural Relay",
         "owner": "Muhammad Fayas",
-        "port": SERVER_PORT,
         "active_pc_clients": len(connected_pc_clients),
         "active_mobile_clients": len(connected_mobile_clients),
-        "websocket": "/ws/jarvis",
     }
 
 
@@ -283,6 +310,7 @@ async def websocket_jarvis_endpoint(websocket: WebSocket):
     await websocket.accept()
     client_host = websocket.client.host if websocket.client else "unknown"
     current_client_type = "unknown"
+    authenticated = False
     logger.info("WebSocket connection established from %s", client_host)
 
     try:
@@ -306,16 +334,19 @@ async def websocket_jarvis_endpoint(websocket: WebSocket):
             msg_type = data.get("type", "command")
             client_type = data.get("client", "unknown")
 
-            # Register client role
-            if client_type == "pc":
-                current_client_type = "pc"
-                connected_pc_clients.add(websocket)
-            elif client_type == "android":
-                current_client_type = "android"
-                connected_mobile_clients.add(websocket)
-
-            # 1. Device Pairing & Ping
-            if msg_type in ("ping", "register"):
+            # Every device must authenticate first.  A public IP or an app
+            # binary alone is never enough to obtain AI or PC-control access.
+            if not authenticated:
+                if msg_type != "register" or client_type not in ("pc", "android") or not is_valid_device_token(data.get("pairing_token")):
+                    await websocket.send_text(json.dumps({"type": "error", "success": False, "error": "Device pairing required."}))
+                    await websocket.close(code=1008)
+                    return
+                authenticated = True
+                current_client_type = client_type
+                if client_type == "pc":
+                    connected_pc_clients.add(websocket)
+                else:
+                    connected_mobile_clients.add(websocket)
                 await websocket.send_text(json.dumps({
                     "type": "pong",
                     "status": "connected",
@@ -323,6 +354,10 @@ async def websocket_jarvis_endpoint(websocket: WebSocket):
                     "pc_online": len(connected_pc_clients) > 0,
                     "mobile_online": len(connected_mobile_clients) > 0,
                 }))
+                continue
+
+            if msg_type == "ping":
+                await websocket.send_text(json.dumps({"type": "pong", "status": "connected"}))
                 continue
 
             # 2. Remote PC Control Command from Mobile -> Broadcast to PC
@@ -390,10 +425,7 @@ async def websocket_jarvis_endpoint(websocket: WebSocket):
 
                 # If the user command on mobile asked to control PC (e.g. "open chrome in my pc", "shutdown my pc"),
                 # and the action is a PC action, also automatically forward the action to the PC!
-                if client_type == "android" and ai_result["action"] in (
-                    "open_chrome", "open_application", "open_website", "open_whatsapp",
-                    "open_file_explorer", "open_settings", "lock_pc", "shutdown_pc", "restart_pc"
-                ):
+                if client_type == "android" and ai_result["action"] not in ("speak",):
                     if connected_pc_clients:
                         logger.info("Auto-forwarding mobile PC action '%s' to PC client", ai_result["action"])
                         remote_event = {

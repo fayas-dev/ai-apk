@@ -41,7 +41,7 @@
         android:label="Jarvis"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:requestLegacyExternalStorage="false">
 
         <activity

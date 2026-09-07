@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/jarvis_response.dart';
 
 enum ConnectionStateStatus {
@@ -11,9 +12,12 @@ enum ConnectionStateStatus {
 }
 
 class JarvisWebSocketService {
-  // Centralized VPS Server URL
+  // Dedicated VPS Server URL (Single source of truth)
   static const String defaultServerUrl = 'ws://45.131.64.32:2004/ws/jarvis';
+  static const String defaultPairingToken = 'JARVIS-FAYAS-2010';
   static String activeServerUrl = defaultServerUrl;
+  static String activePairingToken = defaultPairingToken;
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
@@ -41,8 +45,16 @@ class JarvisWebSocketService {
   // Pending requests: requestId -> Completer<JarvisResponse>
   final Map<String, Completer<JarvisResponse>> _pendingRequests = {};
 
-  void init() {
+  Future<void> init() async {
     _isDisposed = false;
+    final storedUrl = await _secureStorage.read(key: 'jarvis_secure_endpoint');
+    final storedToken = await _secureStorage.read(key: 'jarvis_pairing_token');
+    if (storedUrl != null && storedUrl.isNotEmpty) {
+      activeServerUrl = storedUrl;
+    }
+    if (storedToken != null && storedToken.isNotEmpty) {
+      activePairingToken = storedToken;
+    }
     connect();
   }
 
@@ -53,14 +65,38 @@ class JarvisWebSocketService {
     }
   }
 
-  void connect({String? customUrl}) {
+  void connect({String? customUrl, String? pairingToken}) {
     if (_isDisposed) return;
     if (customUrl != null && customUrl.isNotEmpty) {
-      activeServerUrl = customUrl;
+      activeServerUrl = customUrl.trim();
+      // Reset channel if URL changes
+      if (_channel != null) {
+        try {
+          _channel!.sink.close();
+        } catch (_) {}
+      }
+      _subscription?.cancel();
+      _subscription = null;
+      _channel = null;
+      _currentStatus = ConnectionStateStatus.disconnected;
+    }
+    if (pairingToken != null && pairingToken.isNotEmpty) {
+      activePairingToken = pairingToken.trim();
+    }
+    if (customUrl != null && customUrl.isNotEmpty) {
+      _secureStorage.write(key: 'jarvis_secure_endpoint', value: activeServerUrl);
+      if (pairingToken != null) {
+        _secureStorage.write(key: 'jarvis_pairing_token', value: activePairingToken);
+      }
     }
 
     if (_currentStatus == ConnectionStateStatus.connected ||
         _currentStatus == ConnectionStateStatus.connecting) {
+      return;
+    }
+
+    if (activeServerUrl.isEmpty) {
+      _setStatus(ConnectionStateStatus.disconnected);
       return;
     }
 
@@ -79,14 +115,13 @@ class JarvisWebSocketService {
         cancelOnError: true,
       );
 
-      _setStatus(ConnectionStateStatus.connected);
-      _reconnectAttempts = 0;
-
-      // Register mobile client with server
+      // Register mobile client. The UI becomes connected only after the relay
+      // accepts the pairing token and replies with pong.
       _channel!.sink.add(jsonEncode({
         'type': 'register',
         'client': 'android',
         'device_name': 'Fayas-Mobile',
+        'pairing_token': activePairingToken,
       }));
     } catch (e) {
       _onDisconnected();
@@ -106,6 +141,12 @@ class JarvisWebSocketService {
             _screenDataController.add(b64);
           }
         }
+        return;
+      }
+
+      if (msgType == 'pong' && data['status'] == 'connected') {
+        _setStatus(ConnectionStateStatus.connected);
+        _reconnectAttempts = 0;
         return;
       }
 

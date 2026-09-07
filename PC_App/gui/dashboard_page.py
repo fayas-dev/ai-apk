@@ -184,7 +184,7 @@ class DashboardPage(ctk.CTkFrame):
 
         self.jarvis_reply_label = ctk.CTkLabel(
             reply_card,
-            text="Greetings, sir. All core systems are operational. I am connected to the VPS at 45.131.64.32:2004.",
+            text="Greetings, sir. All core systems are operational. Neural link is secure. Say Hey Jarvis whenever you need me.",
             font=FONT_BODY,
             text_color=TEXT_PRIMARY,
             wraplength=450,
@@ -306,7 +306,7 @@ class DashboardPage(ctk.CTkFrame):
             color = NEON_RED
             badge_bg = "#2E0A12"
             badge_text = "○ VPS OFFLINE"
-            default_hint = "Waiting for VPS reconnection at 45.131.64.32:2004"
+            default_hint = "Neural link offline. Local commands still work."
             self.talk_btn.configure(text="🎤  TAP TO SPEAK", fg_color=CYAN_ACCENT, hover_color=CYAN_HOVER, text_color="#000000", state="normal")
         else:
             color = CYAN_ACCENT
