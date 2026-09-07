@@ -69,8 +69,7 @@ class JarvisSpeechService {
         _updateStatus(SpeechStateStatus.ready);
         return true;
       } else {
-        final hasPerm = await _speech.hasPermission;
-        if (!hasPerm) {
+        if (!_speech.hasPermission) {
           _updateStatus(SpeechStateStatus.permissionDenied);
         } else {
           _updateStatus(SpeechStateStatus.unavailable);
