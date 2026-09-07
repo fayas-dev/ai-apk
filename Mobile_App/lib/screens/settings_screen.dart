@@ -301,7 +301,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 decoration: InputDecoration(
                   labelText: 'WebSocket Server URL',
                   labelStyle: const TextStyle(color: Color(0xFF00E5FF)),
-                  hintText: 'wss://your-private-domain/ws/jarvis',
+                  hintText: 'ws://45.131.64.32:2004/ws/jarvis',
                   hintStyle: const TextStyle(color: Colors.white24),
                   filled: true,
                   fillColor: const Color(0xFF080D15),
@@ -329,9 +329,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
-            ],
-          ),
-        ),
               const SizedBox(height: 12),
               Row(
                 children: [
