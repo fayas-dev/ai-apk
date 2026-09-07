@@ -24,9 +24,11 @@ BASE_DIR = Path(__file__).resolve().parent
 LOGS_DIR = BASE_DIR / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Load Environment Variables
+# Load Environment Variables - check VPS dir first, then project root
 ENV_FILE = BASE_DIR / ".env"
-load_dotenv(dotenv_path=ENV_FILE)
+PARENT_ENV = BASE_DIR.parent / ".env"
+load_dotenv(dotenv_path=ENV_FILE)          # VPS-specific overrides first
+load_dotenv(dotenv_path=PARENT_ENV)        # Project-root fallback
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip()

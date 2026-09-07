@@ -1,15 +1,42 @@
-# JARVIS release files
+# 🤖 JARVIS MARK VII - COMPLETE ECOSYSTEM RELEASE
 
-- `Jarvis-Mobile.apk` — Android app. Install it on Android after allowing installs from this source.
-- `Jarvis-Desktop.exe` — Windows desktop companion. Run it on the PC you want to control.
+**Owner & Master**: Muhammad Fayas (Fayas)  
+**Date of Birth**: 21/03/2010  
+**Location**: Kaipamangalam, Thainagar, Thrissur, Kerala  
 
-Both applications connect to the configured JARVIS relay. Install the desktop companion first, then use the mobile app's settings to confirm the same relay address.
+---
 
-## Integrity checks
+## 📦 What's in this folder:
 
-| File | SHA-256 |
-| --- | --- |
-| `Jarvis-Mobile.apk` | `53E4EE9FC3980D843DB369D74C6012B7EE99AA8F5349E39CB466EA19B5CF2CF3` |
-| `Jarvis-Desktop.exe` | `8529953B0437E529953379C19638CADE24B383B8CFC03F09776C091FE975A212` |
+1. **`Jarvis-PC.exe`** (86.9 MB)
+   - High-tech Cyberpunk Arc Reactor Desktop OS application.
+   - Built with PyInstaller and CustomTkinter.
+   - System tray minimization, zero microphone audio collision, and local direct server on port `8765`.
+   - **Continuous Wake Detection**: Say *"Hey Jarvis"* -> speaks *"Yes, sir?"* -> listens and speaks the intelligent response.
+   - **OpenRouter AI Fallback**: Directly connected to OpenRouter API (`gpt-4o-mini`) from `.env` so Jarvis answers questions even if VPS is offline.
+   - **Zero Third-Party AI Mentions**: Enforces Muhammad Fayas as the sole creator and developer.
 
-The GitHub workflow rebuilds both deliverables from source whenever changes are pushed to the main branch.
+2. **`Jarvis-Mobile.apk`** (29.4 MB)
+   - Android APK built from latest code (Release v14).
+   - **Deep Male Voice**: Tuned masculine voice synthesis on Android.
+   - **One-Tap Connection**: Automatically connects to VPS (`ws://45.131.64.32:2004/ws/jarvis`) or Direct PC on local Wi-Fi.
+   - **Remote PC Control**: Live PC screen streaming with cyan mouse pointer, virtual trackpad, keyboard, and system control.
+   - **Voice Commands**:
+     - *"Who is your developer?"* / *"How is youre developer?"* -> Responds with Muhammad Fayas.
+     - *"Open Chrome in my PC"* / *"Open crome in my pc"* -> Launches Chrome on your PC.
+     - *"Open YouTube"* -> Launches YouTube in Chrome.
+     - *"Open Kiro"* / *"Search Kiro"* -> Searches Google for Kiro and opens in Chrome.
+
+---
+
+## 🚀 Quick Setup Instructions:
+
+### On Your PC:
+1. Double click **`Jarvis-PC.exe`** to start the desktop app.
+2. The Arc Reactor will turn on and begin listening for *"Hey Jarvis"*.
+3. You can minimize the app to the system tray anytime.
+
+### On Your Android Phone:
+1. Copy **`Jarvis-Mobile.apk`** to your phone and install it (allow *Install Unknown Apps* if prompted).
+2. Open **JARVIS**.
+3. It will automatically link to the system. You can also open **Settings** -> tap **Default VPS** or enter your PC's local IP (`ws://<PC_IP>:8765`) to connect directly.

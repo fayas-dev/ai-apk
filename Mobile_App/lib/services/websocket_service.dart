@@ -133,7 +133,14 @@ class JarvisWebSocketService {
       final Map<String, dynamic> data = jsonDecode(message.toString());
       final msgType = data['type'];
 
-      // 1. Screen capture or remote PC response
+      // 1. Pong = authentication accepted → mark as connected
+      if (msgType == 'pong' && data['status'] == 'connected') {
+        _setStatus(ConnectionStateStatus.connected);
+        _reconnectAttempts = 0;
+        return;
+      }
+
+      // 2. Screen capture relay from PC
       if (msgType == 'remote_pc_response') {
         if (data['command'] == 'screen_data' && data['screen'] != null) {
           final b64 = data['screen'].toString();
@@ -141,23 +148,38 @@ class JarvisWebSocketService {
             _screenDataController.add(b64);
           }
         }
+        // remote_pc_response is a relay from PC, not a reply to a pending request
         return;
       }
 
-      if (msgType == 'pong' && data['status'] == 'connected') {
-        _setStatus(ConnectionStateStatus.connected);
-        _reconnectAttempts = 0;
+      // 3. Standard AI response (has request_id)
+      if (msgType == 'response' || data.containsKey('request_id')) {
+        try {
+          final response = JarvisResponse.fromJson(data);
+          final requestId = response.requestId;
+          if (requestId.isNotEmpty && _pendingRequests.containsKey(requestId)) {
+            final completer = _pendingRequests.remove(requestId);
+            if (completer != null && !completer.isCompleted) {
+              completer.complete(response);
+            }
+          }
+        } catch (_) {}
         return;
       }
 
-      // 2. Standard response
-      final response = JarvisResponse.fromJson(data);
-      final requestId = response.requestId;
-      if (requestId.isNotEmpty && _pendingRequests.containsKey(requestId)) {
-        final completer = _pendingRequests.remove(requestId);
-        if (completer != null && !completer.isCompleted) {
-          completer.complete(response);
+      // 4. Error responses
+      if (msgType == 'error') {
+        final requestId = data['request_id']?.toString() ?? '';
+        if (requestId.isNotEmpty && _pendingRequests.containsKey(requestId)) {
+          final completer = _pendingRequests.remove(requestId);
+          if (completer != null && !completer.isCompleted) {
+            completer.complete(JarvisResponse.error(
+              requestId: requestId,
+              message: data['error']?.toString() ?? 'Unknown VPS error.',
+            ));
+          }
         }
+        return;
       }
     } catch (e) {
       // Ignored malformed broadcast

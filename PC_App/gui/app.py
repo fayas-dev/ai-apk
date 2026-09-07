@@ -122,6 +122,11 @@ class JarvisApp(ctk.CTk):
         self.server_url = JARVIS_SERVER_URL
         self.listening_enabled = True
 
+        # Track if the current interaction was voice-initiated (wake word)
+        self._voice_initiated = False
+        self._active_conversation = False
+        self._conversation_session_id = 0
+
         # System Tray Setup
         self.tray_icon = None
         self._setup_system_tray()
@@ -367,22 +372,32 @@ class JarvisApp(ctk.CTk):
         if "LISTEN" in current_state:
             # User clicked to stop listening
             self._active_conversation = False
+            self._voice_initiated = False
             self.listener.cancel_capture()
             self.pages["dashboard"].set_state("STANDBY", 'Say "Hey Jarvis" or tap to speak')
             return
 
-        self._start_conversation_window(timeout=12.0)
+        # Mark as voice-initiated so follow-up conversation window activates
+        self._voice_initiated = True
+        self._start_conversation_window(timeout=15.0)
 
     def _on_wake_detected(self):
         if not self.listening_enabled:
             return
+        self._voice_initiated = True
         self.after(0, lambda: self.pages["dashboard"].set_state(
             "LISTENING",
             "Hey Jarvis — online. Speak the full command, then pause.",
         ))
+        # Respond with "Yes sir" asynchronously without blocking the mic
+        def _say_yes():
+            speak_voice_sync("Yes sir?", self.tts_enabled, timeout=3.0)
+        threading.Thread(target=_say_yes, daemon=True).start()
 
     def _on_command_failed(self):
         """Called when wake phrase was heard but no command followed."""
+        self._voice_initiated = False
+        self._active_conversation = False
         self.after(0, lambda: self.pages["dashboard"].set_state("STANDBY"))
 
     def _on_command_captured(self, command_text: str):
@@ -428,6 +443,10 @@ class JarvisApp(ctk.CTk):
 
     def process_user_command(self, command_text: str):
         """Dispatches command to local intent engine or VPS AI and executes safe actions."""
+        # If user initiates via text/button, reset voice state to prevent follow-up loops
+        if not self._voice_initiated:
+            self._voice_initiated = False
+
         # Update Dashboard & Chat UI
         self.pages["dashboard"].update_transcript(command_text)
         self.pages["dashboard"].set_state("PROCESSING")
@@ -474,10 +493,9 @@ class JarvisApp(ctk.CTk):
                 self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
                 return
 
-            # Step 4: Do not execute arbitrary local text as a fallback. The
-            # action registry or authenticated relay must explicitly authorize it.
+            # Step 4: Fallback for unhandled inputs (AI/NLP local-only processing logic here)
             self.after(0, lambda: self._finalize_action(
-                "speak", "I could not reach the secure neural relay. Please reconnect and try again.", None
+                "speak", "Command received offline. Neural relay is currently inaccessible; manual override required.", None
             ))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -494,26 +512,36 @@ class JarvisApp(ctk.CTk):
         if action_name != "speak":
             self.pages["actions"].add_log_entry(action_name, action_log or speech_text)
 
-        # PAUSE microphone listener completely while speaking to prevent collision/feedback!
+        # Determine if we should keep the conversation window open
+        was_voice = self._voice_initiated
+
+        # PAUSE microphone listener completely while speaking to prevent feedback
         self.listener.pause()
 
         def _speak_and_resume():
+            import time
             if self.tts_enabled:
                 speak_voice_sync(speech_text, True, timeout=20.0)
-            import time
-            time.sleep(0.45)
+            time.sleep(0.35)
             self.listener.resume()
-            self.after(0, lambda: self._start_conversation_window(timeout=12.0))
+            # Only keep conversation open if this was a voice-initiated interaction
+            if was_voice and self.listening_enabled:
+                self.after(0, lambda: self._start_conversation_window(timeout=15.0))
+            else:
+                # Text/button initiated: just go back to standby
+                self.after(0, lambda: self.pages["dashboard"].set_state(
+                    "STANDBY", 'Say "Hey Jarvis" or tap to speak'
+                ))
 
         threading.Thread(target=_speak_and_resume, daemon=True).start()
 
-    def _start_conversation_window(self, timeout: float = 30.0):
+    def _start_conversation_window(self, timeout: float = 15.0):
         """
-        Maintains an active 30-second conversation session.
-        User does NOT need to say 'Hey Jarvis' within this 30s window.
-        If no command is spoken within 30s, mic turns off and resets to STANDBY.
+        Maintains an active follow-up conversation session after a voice command.
+        User does NOT need to say 'Hey Jarvis' within this window.
+        If no command is spoken within the timeout, resets to STANDBY.
         """
-        if not self.listening_enabled:
+        if not self.listening_enabled or not self._voice_initiated:
             self.pages["dashboard"].set_state("STANDBY")
             return
 
@@ -524,19 +552,36 @@ class JarvisApp(ctk.CTk):
 
         self.pages["dashboard"].set_state(
             "LISTENING",
-            "Follow-up window — finish the full command, then pause",
+            "Follow-up — speak your next command...",
         )
 
         def _session_worker():
             command = self.listener.capture_single_command(timeout=timeout)
-            if not getattr(self, "_active_conversation", False) or getattr(self, "_conversation_session_id", 0) != session_id:
+
+            # Check if this session is still valid
+            if not self._active_conversation or self._conversation_session_id != session_id:
                 return
 
+            self._active_conversation = False
+
             if command and command.strip():
-                self._active_conversation = False
-                self.after(0, lambda: self.process_user_command(command))
+                # Strip any accidental wake phrase repetition
+                from wake_phrase import parse_wake_phrase
+                found, remainder = parse_wake_phrase(command)
+                if found and remainder:
+                    command = remainder
+                elif found:
+                    # Just repeated wake phrase, go to standby
+                    self.after(0, lambda: self.pages["dashboard"].set_state(
+                        "STANDBY", 'Say "Hey Jarvis" whenever you are ready.'
+                    ))
+                    return
+
+                if command.strip():
+                    self.after(0, lambda: self.process_user_command(command.strip()))
             else:
-                self._active_conversation = False
+                # Timed out or nothing heard — end conversation session
+                self._voice_initiated = False
                 self.after(0, lambda: self.pages["dashboard"].set_state(
                     "STANDBY",
                     'Say "Hey Jarvis" whenever you are ready.',
