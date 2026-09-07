@@ -112,7 +112,7 @@ class _RemoteTrackpadScreenState extends State<RemoteTrackpadScreen> {
               decoration: BoxDecoration(
                 color: const Color(0xFF0D1826),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.3)),
+                border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.3)),
               ),
               clipBehavior: Clip.antiAlias,
               child: _screenBase64 != null
@@ -187,10 +187,10 @@ class _RemoteTrackpadScreenState extends State<RemoteTrackpadScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF0E1624),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.2)),
+                  border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.2)),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.5),
+                      color: Colors.black.withOpacity(0.5),
                       blurRadius: 10,
                     ),
                   ],
@@ -354,9 +354,9 @@ class _RemoteTrackpadScreenState extends State<RemoteTrackpadScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
+            color: color.withOpacity(0.12),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withValues(alpha: 0.4)),
+            border: Border.all(color: color.withOpacity(0.4)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
