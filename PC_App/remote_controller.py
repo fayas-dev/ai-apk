@@ -103,7 +103,26 @@ class RemoteController:
         compresses it as JPEG, and returns a Base64-encoded data string.
         """
         try:
+            from PIL import ImageDraw
             screenshot = pyautogui.screenshot()
+            cur_x, cur_y = pyautogui.position()
+
+            # Draw live visible PC mouse cursor pointer (cyan arrow with black border)
+            try:
+                draw = ImageDraw.Draw(screenshot)
+                cursor_points = [
+                    (cur_x, cur_y),
+                    (cur_x, cur_y + 18),
+                    (cur_x + 5, cur_y + 14),
+                    (cur_x + 10, cur_y + 22),
+                    (cur_x + 13, cur_y + 20),
+                    (cur_x + 8, cur_y + 12),
+                    (cur_x + 14, cur_y + 12),
+                ]
+                draw.polygon(cursor_points, fill="#00E5FF", outline="black")
+            except Exception:
+                pass
+
             # Scale down to maintain aspect ratio while keeping payload small
             width, height = screenshot.size
             if width > max_width:

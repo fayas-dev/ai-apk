@@ -40,47 +40,63 @@ from gui.theme import (
 from jarvis_client import JarvisClient
 from speech_listener import SpeechListener
 
-# Global TTS setup
-_tts_engine = None
-_tts_lock = threading.Lock()
-try:
-    import pyttsx3
-    _tts_engine = pyttsx3.init()
-    _tts_engine.setProperty("rate", 185)
-    voices = _tts_engine.getProperty("voices")
-    if voices:
-        for v in voices:
-            if "david" in v.name.lower() or "zira" in v.name.lower():
-                _tts_engine.setProperty("voice", v.id)
+import queue
+
+# Dedicated Thread-Safe TTS Worker System
+_tts_queue = queue.Queue()
+_tts_speed = 185
+_tts_engine_ref = None
+
+def _tts_worker_loop():
+    global _tts_engine_ref
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        _tts_engine_ref = engine
+        engine.setProperty("rate", _tts_speed)
+        voices = engine.getProperty("voices")
+        if voices:
+            for v in voices:
+                if "david" in v.name.lower() or "male" in v.name.lower():
+                    engine.setProperty("voice", v.id)
+                    break
+
+        while True:
+            item = _tts_queue.get()
+            if item is None:
                 break
-except Exception:
-    _tts_engine = None
+            text, done_event = item
+            try:
+                engine.say(text)
+                engine.runAndWait()
+            except Exception as ex:
+                pass
+            finally:
+                if done_event:
+                    done_event.set()
+                _tts_queue.task_done()
+    except Exception as e:
+        pass
 
-
-def speak_voice_sync(text: str, enabled: bool = True):
-    """Speaks text synchronously, blocking until audio playback finishes."""
-    if not enabled or not _tts_engine or not text:
-        return
-    with _tts_lock:
-        try:
-            _tts_engine.say(text)
-            _tts_engine.runAndWait()
-        except Exception:
-            pass
+# Start dedicated background TTS loop thread
+_tts_worker_thread = threading.Thread(target=_tts_worker_loop, daemon=True)
+_tts_worker_thread.start()
 
 
 def speak_voice(text: str, enabled: bool = True):
-    if not enabled or not _tts_engine or not text:
+    """Asynchronously speaks text through the dedicated TTS engine worker."""
+    if not enabled or not text or not text.strip():
         return
-    def _run():
-        with _tts_lock:
-            try:
-                _tts_engine.say(text)
-                _tts_engine.runAndWait()
-            except Exception:
-                pass
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+    _tts_queue.put((text.strip(), None))
+
+
+def speak_voice_sync(text: str, enabled: bool = True, timeout: float = 6.0):
+    """Synchronously speaks text and blocks until speech playback finishes."""
+    if not enabled or not text or not text.strip():
+        return
+    done_event = threading.Event()
+    _tts_queue.put((text.strip(), done_event))
+    done_event.wait(timeout=timeout)
 
 
 class JarvisApp(ctk.CTk):

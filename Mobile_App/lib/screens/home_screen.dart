@@ -303,7 +303,53 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
-    // 2. Instant Local Actions
+    // 2. PC Actions from Mobile ("open chrome in my pc", "pcyil chrome", "open whatsapp in my pc", etc.)
+    if (clean.contains('in my pc') ||
+        clean.contains('on my pc') ||
+        clean.contains('on pc') ||
+        clean.contains('in pc') ||
+        clean.contains('pcyil') ||
+        clean.contains('pc-yil')) {
+      if (clean.contains('chrome') || clean.contains('ക്രോം')) {
+        _wsService.openChromeOnPc();
+        await _handleLocalSuccess('Opening Google Chrome on your PC, sir.', action: 'open_chrome');
+        return;
+      }
+      if (clean.contains('whatsapp') || clean.contains('വാട്സ്ആപ്പ്')) {
+        _wsService.openWhatsAppOnPc();
+        await _handleLocalSuccess('Opening WhatsApp on your PC, sir.', action: 'open_whatsapp');
+        return;
+      }
+      if (clean.contains('shutdown') || clean.contains('turn off')) {
+        _wsService.shutdownPc();
+        await _handleLocalSuccess('Sending shutdown command to your PC, sir.', action: 'shutdown_pc');
+        return;
+      }
+      if (clean.contains('restart')) {
+        _wsService.restartPc();
+        await _handleLocalSuccess('Sending restart command to your PC, sir.', action: 'restart_pc');
+        return;
+      }
+      if (clean.contains('lock')) {
+        _wsService.lockPc();
+        await _handleLocalSuccess('Locking your PC screen, sir.', action: 'lock_pc');
+        return;
+      }
+      if (clean.contains('screen') || clean.contains('mouse') || clean.contains('trackpad')) {
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => RemoteTrackpadScreen(wsService: _wsService),
+            ),
+          );
+        }
+        await _handleLocalSuccess('Launching PC live screen and trackpad, sir.', action: 'view_pc_screen');
+        return;
+      }
+    }
+
+    // 3. Instant Local Phone Actions
     if (clean.contains('open whatsapp') || clean.contains('വാട്സ്ആപ്പ്')) {
       MobileActionsService.openWhatsApp();
       await _handleLocalSuccess('Opening WhatsApp, sir.', action: 'open_whatsapp');
@@ -316,7 +362,7 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
-    if (clean.contains('trackpad') || clean.contains('mouse') || clean.contains('pc screen')) {
+    if (clean.contains('trackpad') || clean.contains('mouse') || clean.contains('pc screen') || clean.contains('screen')) {
       if (mounted) {
         Navigator.push(
           context,
