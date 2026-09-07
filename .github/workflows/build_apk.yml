@@ -1,0 +1,44 @@
+name: Build Jarvis Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Get Dependencies
+        run: |
+          cd Mobile_App
+          flutter pub get
+
+      - name: Build Android Release APK
+        run: |
+          cd Mobile_App
+          flutter build apk --release --no-tree-shake-icons
+
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-Release-APK
+          path: Mobile_App/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
