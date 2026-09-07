@@ -121,6 +121,54 @@ def open_website(target: Optional[str] = None) -> Tuple[bool, str]:
         return False, f"Could not open website: {e}"
 
 
+def search_and_open(target: Optional[str] = None) -> Tuple[bool, str]:
+    """Opens Chrome and searches for the query, or opens it if it's a known site."""
+    logger.info("Executing action: search_and_open (target: %s)", target)
+    if not target:
+        return False, "No search query provided."
+    
+    query = target.strip()
+    
+    # Common sites mapping
+    site_map = {
+        "youtube": "https://www.youtube.com",
+        "facebook": "https://www.facebook.com",
+        "twitter": "https://www.twitter.com",
+        "instagram": "https://www.instagram.com",
+        "github": "https://www.github.com",
+        "google": "https://www.google.com",
+        "gmail": "https://mail.google.com",
+        "whatsapp": "https://web.whatsapp.com",
+    }
+    
+    # Check if it's a known site
+    query_lower = query.lower()
+    if query_lower in site_map:
+        url = site_map[query_lower]
+    else:
+        # Google search
+        url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+    
+    try:
+        # Try to open in Chrome specifically
+        chrome_paths = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        ]
+        for chrome_path in chrome_paths:
+            if os.path.exists(chrome_path):
+                subprocess.Popen([chrome_path, url])
+                return True, f"Opening {query} in Chrome."
+        
+        # Fallback to default browser
+        webbrowser.open(url)
+        return True, f"Opened {query} in browser."
+    except Exception as e:
+        logger.error("Failed to search and open %s: %s", query, e)
+        return False, f"Could not open {query}: {e}"
+
+
 def open_application(target: Optional[str] = None) -> Tuple[bool, str]:
     """Safely opens a whitelisted local application."""
     logger.info("Executing action: open_application (target: %s)", target)
@@ -201,6 +249,96 @@ def restart_pc(target: Optional[str] = None) -> Tuple[bool, str]:
         return False, f"Restart command failed: {e}"
 
 
+def search_web(target: Optional[str] = None, speak_callback: Optional[Callable[[str], None]] = None) -> Tuple[bool, str]:
+    """Opens Google Chrome and searches for the given query."""
+    logger.info("Executing action: search_web (target: %s)", target)
+    if not target:
+        return False, "No search query specified."
+
+    query = target.strip()
+    search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+    speech = f"Searching for {query} on Google, sir."
+    if speak_callback:
+        speak_callback(speech)
+    try:
+        # Try Chrome first
+        chrome_paths = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        ]
+        for path in chrome_paths:
+            if os.path.exists(path):
+                subprocess.Popen([path, search_url])
+                return True, f"Searching for '{query}' in Chrome."
+        # Fallback to default browser
+        webbrowser.open(search_url)
+        return True, f"Searching for '{query}' in your default browser."
+    except Exception as e:
+        logger.error("Failed to search: %s", e)
+        webbrowser.open(search_url)
+        return True, f"Searching for '{query}'."
+
+
+def open_url_in_chrome(target: Optional[str] = None, speak_callback: Optional[Callable[[str], None]] = None) -> Tuple[bool, str]:
+    """Opens a specific URL in Google Chrome."""
+    logger.info("Executing action: open_url_in_chrome (target: %s)", target)
+    if not target:
+        return False, "No URL specified."
+
+    url = target.strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        url = "https://" + url
+
+    if speak_callback:
+        speak_callback(f"Opening {target} in Chrome, sir.")
+    try:
+        chrome_paths = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        ]
+        for path in chrome_paths:
+            if os.path.exists(path):
+                subprocess.Popen([path, url])
+                return True, f"Opened {url} in Chrome."
+        webbrowser.open(url)
+        return True, f"Opened {url} in default browser."
+    except Exception as e:
+        logger.error("Failed to open URL: %s", e)
+        webbrowser.open(url)
+        return True, f"Opened {url}."
+
+
+def search_and_open_app(target: Optional[str] = None, speak_callback: Optional[Callable[[str], None]] = None) -> Tuple[bool, str]:
+    """Searches for an app using Windows Search and opens it."""
+    logger.info("Executing action: search_and_open_app (target: %s)", target)
+    if not target:
+        return False, "No application name specified."
+
+    app_name = target.strip()
+    if speak_callback:
+        speak_callback(f"Searching for {app_name} and opening it, sir.")
+
+    # First check safe app map
+    key = app_name.lower()
+    if key in SAFE_APP_MAP:
+        try:
+            subprocess.Popen([SAFE_APP_MAP[key]], shell=False)
+            return True, f"Opened {app_name}."
+        except Exception:
+            pass
+
+    # Use Windows search via PowerShell start
+    try:
+        clean_name = "".join(c for c in app_name if c.isalnum() or c in ("-", "_", " "))
+        subprocess.Popen(["cmd.exe", "/c", "start", "", clean_name], shell=False)
+        return True, f"Searched and opened {app_name}."
+    except Exception as e:
+        logger.error("Failed to search and open app: %s", e)
+        return False, f"Could not find or open {app_name}: {e}"
+
+
 def speak(target: Optional[str] = None) -> Tuple[bool, str]:
     """Spoken response only, no system changes."""
     return True, "Completed."
@@ -214,10 +352,14 @@ ACTION_REGISTRY: Dict[str, Callable[[Optional[str]], Tuple[bool, str]]] = {
     "open_file_explorer": open_file_explorer,
     "open_settings": open_settings,
     "open_website": open_website,
+    "search_and_open": search_and_open,
     "open_application": open_application,
     "lock_pc": lock_pc,
     "shutdown_pc": shutdown_pc,
     "restart_pc": restart_pc,
+    "search_web": search_web,
+    "open_url_in_chrome": open_url_in_chrome,
+    "search_and_open_app": search_and_open_app,
 }
 
 

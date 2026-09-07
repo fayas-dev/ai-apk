@@ -183,4 +183,65 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
             "speech": "Opening Windows Settings, sir.",
         }
 
+    # 10. Open well-known websites ("open youtube", "open instagram", etc.)
+    WEBSITE_MAP = {
+        "youtube": "https://www.youtube.com",
+        "google": "https://www.google.com",
+        "gmail": "https://mail.google.com",
+        "instagram": "https://www.instagram.com",
+        "facebook": "https://www.facebook.com",
+        "twitter": "https://twitter.com",
+        "x": "https://x.com",
+        "github": "https://github.com",
+        "reddit": "https://www.reddit.com",
+        "linkedin": "https://www.linkedin.com",
+        "netflix": "https://www.netflix.com",
+        "amazon": "https://www.amazon.com",
+        "spotify": "https://open.spotify.com",
+        "telegram": "https://web.telegram.org",
+        "discord": "https://discord.com",
+        "stack overflow": "https://stackoverflow.com",
+        "stackoverflow": "https://stackoverflow.com",
+        "pinterest": "https://www.pinterest.com",
+        "tiktok": "https://www.tiktok.com",
+    }
+
+    open_match = re.search(r"\bopen\s+(.+?)(?:\s+in\s+(?:my\s+)?(?:pc|chrome|browser))?$", clean)
+    if open_match:
+        target_name = open_match.group(1).strip()
+        # Check if it's a known website
+        if target_name in WEBSITE_MAP:
+            url = WEBSITE_MAP[target_name]
+            return {
+                "success": True,
+                "action": "open_url_in_chrome",
+                "target": url,
+                "speech": f"Opening {target_name.title()} in Chrome, sir.",
+            }
+
+    # 11. Search query ("search kiro", "search for python tutorials", etc.)
+    search_match = re.search(r"\b(?:search\s+for|search|google|look\s+up)\s+(.+?)(?:\s+in\s+(?:my\s+)?(?:pc|chrome|browser))?$", clean)
+    if search_match:
+        search_query = search_match.group(1).strip()
+        if search_query:
+            return {
+                "success": True,
+                "action": "search_web",
+                "target": search_query,
+                "speech": f"Searching for {search_query} on Google, sir.",
+            }
+
+    # 12. Generic open app ("open notepad", "open calculator", "open kiro")
+    if open_match:
+        target_name = open_match.group(1).strip()
+        # Skip already-handled keywords
+        skip_keywords = ["chrome", "whatsapp", "settings", "file", "explorer"]
+        if not any(kw in target_name for kw in skip_keywords):
+            return {
+                "success": True,
+                "action": "search_and_open_app",
+                "target": target_name,
+                "speech": f"Searching for {target_name} and opening it, sir.",
+            }
+
     return None

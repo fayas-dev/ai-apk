@@ -67,3 +67,4 @@ PC_App/build/
 PC_App/*.spec
 *.apk
 *.exe
+*.zip

@@ -271,6 +271,26 @@ class JarvisWebSocketService {
     sendRemoteCommand('open_whatsapp');
   }
 
+  /// Search Google in PC Chrome
+  void searchWebOnPc(String query) {
+    sendRemoteCommand('search_web', extras: {'target': query, 'query': query});
+  }
+
+  /// Open a specific URL in PC Chrome
+  void openUrlOnPc(String url) {
+    sendRemoteCommand('open_url_in_chrome', extras: {'target': url});
+  }
+
+  /// Open YouTube on PC Chrome
+  void openYoutubeOnPc() {
+    sendRemoteCommand('open_url_in_chrome', extras: {'target': 'https://www.youtube.com'});
+  }
+
+  /// Search and open any app on PC
+  void searchAndOpenAppOnPc(String appName) {
+    sendRemoteCommand('search_and_open_app', extras: {'target': appName});
+  }
+
   void dispose() {
     _isDisposed = true;
     _reconnectTimer?.cancel();

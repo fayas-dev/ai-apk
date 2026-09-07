@@ -310,6 +310,14 @@ class _HomeScreenState extends State<HomeScreen>
         clean.contains('in pc') ||
         clean.contains('pcyil') ||
         clean.contains('pc-yil')) {
+
+      // YouTube on PC
+      if (clean.contains('youtube') || clean.contains('യൂട്യൂബ്')) {
+        _wsService.openYoutubeOnPc();
+        await _handleLocalSuccess('Opening YouTube on your PC in Chrome, sir.', action: 'open_url_in_chrome');
+        return;
+      }
+
       if (clean.contains('chrome') || clean.contains('ക്രോം')) {
         _wsService.openChromeOnPc();
         await _handleLocalSuccess('Opening Google Chrome on your PC, sir.', action: 'open_chrome');
@@ -347,9 +355,72 @@ class _HomeScreenState extends State<HomeScreen>
         await _handleLocalSuccess('Launching PC live screen and trackpad, sir.', action: 'view_pc_screen');
         return;
       }
+
+      // Search on PC ("search kiro in my pc", "search python in pc")
+      final pcSearchMatch = RegExp(r'(?:search|search for|google|look up)\s+(.+?)(?:\s+(?:in|on)\s+(?:my\s+)?pc)', caseSensitive: false).firstMatch(clean);
+      if (pcSearchMatch != null) {
+        final searchQuery = pcSearchMatch.group(1)?.trim() ?? '';
+        if (searchQuery.isNotEmpty) {
+          _wsService.searchWebOnPc(searchQuery);
+          await _handleLocalSuccess('Searching for $searchQuery on your PC, sir.', action: 'search_web');
+          return;
+        }
+      }
+
+      // Open any website/app on PC ("open instagram in my pc", "open kiro in my pc")
+      final pcOpenMatch = RegExp(r'open\s+(.+?)(?:\s+(?:in|on)\s+(?:my\s+)?pc)', caseSensitive: false).firstMatch(clean);
+      if (pcOpenMatch != null) {
+        final appName = pcOpenMatch.group(1)?.trim() ?? '';
+        if (appName.isNotEmpty) {
+          // Check for well-known websites
+          const websiteMap = {
+            'youtube': 'https://www.youtube.com',
+            'google': 'https://www.google.com',
+            'gmail': 'https://mail.google.com',
+            'instagram': 'https://www.instagram.com',
+            'facebook': 'https://www.facebook.com',
+            'twitter': 'https://twitter.com',
+            'github': 'https://github.com',
+            'reddit': 'https://www.reddit.com',
+            'linkedin': 'https://www.linkedin.com',
+            'netflix': 'https://www.netflix.com',
+            'amazon': 'https://www.amazon.com',
+            'spotify': 'https://open.spotify.com',
+            'telegram': 'https://web.telegram.org',
+            'discord': 'https://discord.com',
+            'tiktok': 'https://www.tiktok.com',
+            'pinterest': 'https://www.pinterest.com',
+          };
+          if (websiteMap.containsKey(appName)) {
+            _wsService.openUrlOnPc(websiteMap[appName]!);
+            await _handleLocalSuccess('Opening ${appName[0].toUpperCase()}${appName.substring(1)} on your PC in Chrome, sir.', action: 'open_url_in_chrome');
+          } else {
+            _wsService.searchAndOpenAppOnPc(appName);
+            await _handleLocalSuccess('Searching for $appName and opening it on your PC, sir.', action: 'search_and_open_app');
+          }
+          return;
+        }
+      }
+    }
+
+    // 2.5 Search commands (no "in my pc" - searches on PC by default)
+    final searchMatch = RegExp(r'^(?:search|search for|google|look up)\s+(.+)$', caseSensitive: false).firstMatch(clean);
+    if (searchMatch != null) {
+      final searchQuery = searchMatch.group(1)?.trim() ?? '';
+      if (searchQuery.isNotEmpty) {
+        _wsService.searchWebOnPc(searchQuery);
+        await _handleLocalSuccess('Searching for $searchQuery on Google, sir.', action: 'search_web');
+        return;
+      }
     }
 
     // 3. Instant Local Phone Actions
+    if (clean.contains('open youtube') || clean.contains('യൂട്യൂബ്')) {
+      MobileActionsService.openUrl('https://www.youtube.com');
+      await _handleLocalSuccess('Opening YouTube, sir.', action: 'open_website');
+      return;
+    }
+
     if (clean.contains('open whatsapp') || clean.contains('വാട്സ്ആപ്പ്')) {
       MobileActionsService.openWhatsApp();
       await _handleLocalSuccess('Opening WhatsApp, sir.', action: 'open_whatsapp');

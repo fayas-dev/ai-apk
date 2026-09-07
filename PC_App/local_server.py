@@ -127,6 +127,23 @@ class LocalDirectServer:
         # 1. Remote PC commands (mouse, keyboard, power, screen)
         if msg_type in ("remote_pc_command", "remote_command"):
             cmd = data.get("command", "")
+
+            # Handle browser/search commands directly via action registry
+            if cmd in ("search_web", "open_url_in_chrome", "search_and_open_app", "open_youtube"):
+                target = data.get("target", data.get("query", ""))
+                if cmd == "open_youtube":
+                    cmd = "open_url_in_chrome"
+                    target = "https://www.youtube.com"
+                success, msg = execute_action(cmd, target)
+                await ws.send(
+                    json.dumps({
+                        "type": "remote_pc_response",
+                        "command": cmd,
+                        "result": {"success": success, "message": msg},
+                    })
+                )
+                return
+
             res = RemoteController.execute_remote_command(data)
 
             if self.on_remote_command:
