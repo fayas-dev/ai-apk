@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/jarvis_response.dart';
 
 enum ConnectionStateStatus {
@@ -17,7 +16,6 @@ class JarvisWebSocketService {
   static const String defaultPairingToken = 'JARVIS-FAYAS-2010';
   static String activeServerUrl = defaultServerUrl;
   static String activePairingToken = defaultPairingToken;
-  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
@@ -47,14 +45,6 @@ class JarvisWebSocketService {
 
   Future<void> init() async {
     _isDisposed = false;
-    final storedUrl = await _secureStorage.read(key: 'jarvis_secure_endpoint');
-    final storedToken = await _secureStorage.read(key: 'jarvis_pairing_token');
-    if (storedUrl != null && storedUrl.isNotEmpty) {
-      activeServerUrl = storedUrl;
-    }
-    if (storedToken != null && storedToken.isNotEmpty) {
-      activePairingToken = storedToken;
-    }
     connect();
   }
 
@@ -82,12 +72,6 @@ class JarvisWebSocketService {
     }
     if (pairingToken != null && pairingToken.isNotEmpty) {
       activePairingToken = pairingToken.trim();
-    }
-    if (customUrl != null && customUrl.isNotEmpty) {
-      _secureStorage.write(key: 'jarvis_secure_endpoint', value: activeServerUrl);
-      if (pairingToken != null) {
-        _secureStorage.write(key: 'jarvis_pairing_token', value: activePairingToken);
-      }
     }
 
     if (_currentStatus == ConnectionStateStatus.connected ||
