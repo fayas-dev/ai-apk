@@ -5,8 +5,9 @@ class JarvisTtsService {
   bool _isSpeaking = false;
   bool get isSpeaking => _isSpeaking;
 
-  double _pitch = 0.85; // Low pitch for deep male Jarvis persona
+  double _pitch = 0.70; // Low pitch for deep male Jarvis persona
   double _rate = 0.50;  // Standard measured speech rate
+  Map<String, String>? _maleVoice;
 
   double get pitch => _pitch;
   double get rate => _rate;
@@ -26,9 +27,18 @@ class JarvisTtsService {
             if (v is Map) {
               final name = (v['name'] ?? '').toString().toLowerCase();
               final locale = (v['locale'] ?? '').toString().toLowerCase();
-              if ((locale.contains('en-us') || locale.contains('en-gb')) &&
-                  (name.contains('male') || name.contains('david') || name.contains('george') || name.contains('guy'))) {
-                await _flutterTts.setVoice({'name': v['name'], 'locale': v['locale']});
+              final gender = (v['gender'] ?? '').toString().toLowerCase();
+              if ((locale.contains('en-us') || locale.contains('en-gb') || locale.contains('en-in')) &&
+                  (gender == 'male' ||
+                   name.contains('male') ||
+                   name.contains('en-us-x-sfg') ||
+                   name.contains('en-us-x-iol') ||
+                   name.contains('en-gb-x-rjs') ||
+                   name.contains('david') ||
+                   name.contains('george') ||
+                   name.contains('guy'))) {
+                _maleVoice = {'name': v['name'].toString(), 'locale': v['locale'].toString()};
+                await _flutterTts.setVoice(_maleVoice!);
                 break;
               }
             }
@@ -72,6 +82,11 @@ class JarvisTtsService {
         await _flutterTts.setLanguage('ml-IN');
       } else {
         await _flutterTts.setLanguage('en-US');
+        if (_maleVoice != null) {
+          try {
+            await _flutterTts.setVoice(_maleVoice!);
+          } catch (_) {}
+        }
       }
       await _flutterTts.setPitch(_pitch);
       await _flutterTts.setSpeechRate(_rate);

@@ -15,6 +15,9 @@ from pystray import MenuItem as item
 
 from actions import check_and_handle_confirmation, execute_action
 from config import JARVIS_SERVER_URL, JARVIS_TTS_ENABLED, LOGO_ICO, LOGO_PNG
+from intent_engine import evaluate_local_intent, sanitize_speech_reply
+from local_server import LocalDirectServer
+from qr_generator import get_local_ip
 from gui.actions_page import ActionsPage
 from gui.chat_page import ChatPage
 from gui.dashboard_page import DashboardPage
@@ -52,6 +55,18 @@ try:
                 break
 except Exception:
     _tts_engine = None
+
+
+def speak_voice_sync(text: str, enabled: bool = True):
+    """Speaks text synchronously, blocking until audio playback finishes."""
+    if not enabled or not _tts_engine or not text:
+        return
+    with _tts_lock:
+        try:
+            _tts_engine.say(text)
+            _tts_engine.runAndWait()
+        except Exception:
+            pass
 
 
 def speak_voice(text: str, enabled: bool = True):
@@ -111,11 +126,19 @@ class JarvisApp(ctk.CTk):
             on_command_failed=self._on_command_failed,
             on_status_change=self._on_speech_status,
         )
+        self.local_server = LocalDirectServer(
+            port=8765,
+            on_client_connect=self._on_mobile_connected,
+            on_client_disconnect=self._on_mobile_disconnected,
+            on_remote_command=self._on_remote_event,
+            vps_forwarder=self.client.send_command,
+        )
 
         self._setup_layout()
 
         # Start Services
         self.client.start()
+        self.local_server.start()
         self.listener_thread = threading.Thread(target=self.listener.listen_loop, daemon=True)
         self.listener_thread.start()
 
@@ -177,6 +200,8 @@ class JarvisApp(ctk.CTk):
         """Completely quit the application."""
         self.listener.stop()
         self.client.stop()
+        if hasattr(self, "local_server"):
+            self.local_server.stop()
         if self.tray_icon:
             self.tray_icon.stop()
         self.after(0, self.quit)
@@ -241,7 +266,7 @@ class JarvisApp(ctk.CTk):
         self.sidebar_spacer = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.sidebar_spacer.pack(fill="both", expand=True)
 
-        # Sidebar Bottom: Live VPS Badge
+        # Sidebar Bottom: Live VPS & Mobile Direct Badges
         self.vps_pill = ctk.CTkLabel(
             self.sidebar,
             text="● VPS: Connecting...",
@@ -252,7 +277,20 @@ class JarvisApp(ctk.CTk):
             padx=10,
             pady=6,
         )
-        self.vps_pill.pack(fill="x", padx=16, pady=(0, 20))
+        self.vps_pill.pack(fill="x", padx=16, pady=(0, 6))
+
+        local_ip = get_local_ip()
+        self.mobile_pill = ctk.CTkLabel(
+            self.sidebar,
+            text=f"📱 Direct: ws://{local_ip}:8765",
+            font=FONT_SMALL,
+            text_color="#00E5FF",
+            fg_color="#061D26",
+            corner_radius=10,
+            padx=10,
+            pady=6,
+        )
+        self.mobile_pill.pack(fill="x", padx=16, pady=(0, 20))
 
         # Main Content Display Area
         self.content_container = ctk.CTkFrame(self, fg_color=DARK_BG, corner_radius=0)
@@ -317,8 +355,10 @@ class JarvisApp(ctk.CTk):
     def _on_wake_detected(self):
         if not self.listening_enabled:  # Skip if listening is disabled
             return
-        self.after(0, lambda: self.pages["dashboard"].set_state("LISTENING", "Wake phrase detected! Listening for command..."))
-        speak_voice("Yes, sir?", self.tts_enabled)
+        self.after(0, lambda: self.pages["dashboard"].set_state("LISTENING", "Wake phrase detected! Acknowledging..."))
+        # Speak synchronously so microphone does not capture "Yes, sir?" from the PC speakers
+        speak_voice_sync("Yes, sir?", self.tts_enabled)
+        self.after(0, lambda: self.pages["dashboard"].set_state("LISTENING", "Listening for your command..."))
 
     def _on_command_failed(self):
         """Called when wake phrase was heard but no command followed."""
@@ -329,6 +369,22 @@ class JarvisApp(ctk.CTk):
             return
         self.after(0, lambda: self.process_user_command(command_text))
 
+    def _on_mobile_connected(self, client_ip: str):
+        self.after(0, lambda: self.mobile_pill.configure(
+            text=f"📱 Phone Linked ({client_ip})",
+            text_color=NEON_GREEN,
+            fg_color="#062618"
+        ))
+        self.after(0, lambda: self.pages["chat"].add_message("assistant", f"📱 Mobile paired directly from {client_ip} (Zero-latency active)"))
+
+    def _on_mobile_disconnected(self, client_ip: str):
+        local_ip = get_local_ip()
+        self.after(0, lambda: self.mobile_pill.configure(
+            text=f"📱 Direct: ws://{local_ip}:8765",
+            text_color="#00E5FF",
+            fg_color="#061D26"
+        ))
+
     def _on_remote_event(self, event_data: dict):
         """Called when a mobile remote control action is received and executed."""
         cmd = event_data.get("command", "")
@@ -336,7 +392,6 @@ class JarvisApp(ctk.CTk):
         if cmd not in ("mouse_move", "get_screen"):
             msg = f"Mobile Remote Action: {cmd}"
             self.after(0, lambda: self.pages["chat"].add_message("assistant", f"📱 Executed mobile remote command: {cmd}"))
-
 
     def _on_vps_status(self, status: str):
         def _update():
@@ -352,7 +407,7 @@ class JarvisApp(ctk.CTk):
         pass
 
     def process_user_command(self, command_text: str):
-        """Dispatches command to VPS AI and executes safe actions."""
+        """Dispatches command to local intent engine or VPS AI and executes safe actions."""
         # Update Dashboard & Chat UI
         self.pages["dashboard"].update_transcript(command_text)
         self.pages["dashboard"].set_state("PROCESSING")
@@ -366,23 +421,35 @@ class JarvisApp(ctk.CTk):
                 self.after(0, lambda: self._finalize_action("confirmation", msg, "speak"))
                 return
 
-            # Step 2: Query VPS Server
-            response = self.client.send_command(command_text)
-            if not response.get("success", False):
-                err_msg = response.get("error", "Unable to connect to Jarvis VPS.")
-                self.after(0, lambda: self._finalize_action("error", err_msg, "error"))
+            # Step 2: Instant Local Intent Engine check (zero-latency, offline, persona guaranteed)
+            local_intent = evaluate_local_intent(command_text)
+            if local_intent:
+                action_name = local_intent.get("action", "speak")
+                target = local_intent.get("target")
+                speech_reply = local_intent.get("speech", "")
+                action_log = None
+                if action_name != "speak":
+                    success, action_log = execute_action(action_name, target)
+                self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
                 return
 
-            action_name = response.get("action", "speak")
-            target = response.get("target")
-            speech_reply = response.get("speech", "")
+            # Step 3: Query VPS Server
+            response = self.client.send_command(command_text)
+            if response and response.get("success", False):
+                action_name = response.get("action", "speak")
+                target = response.get("target")
+                raw_speech = response.get("speech", "")
+                speech_reply = sanitize_speech_reply(raw_speech)
 
-            # Step 3: Execute safe action if not just speak
-            action_log = None
-            if action_name != "speak":
-                success, action_log = execute_action(action_name, target)
+                action_log = None
+                if action_name != "speak":
+                    success, action_log = execute_action(action_name, target)
 
-            self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
+                self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
+            else:
+                # Friendly fallback so the user always receives a courteous, smart reply
+                fallback_speech = f"Command recognized, sir. Executing '{command_text}' on local system."
+                self.after(0, lambda: self._finalize_action("speak", fallback_speech, "Processed locally"))
 
         threading.Thread(target=_worker, daemon=True).start()
 

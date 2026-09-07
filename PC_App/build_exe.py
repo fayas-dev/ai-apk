@@ -78,6 +78,8 @@ def build_executable():
         "--collect-all=qrcode",
         "--hidden-import=PIL",
         "--hidden-import=PIL._tkinter_finder",
+        "--hidden-import=intent_engine",
+        "--hidden-import=local_server",
     ]
 
     if LOGO_ICO.exists():

@@ -177,8 +177,6 @@ class SpeechListener:
 
                 if wake_found:
                     logger.info("Wake phrase detected!")
-                    if self.on_wake_detected:
-                        self.on_wake_detected()
 
                     if inline_command:
                         self._notify_status("Command recognized")
@@ -186,9 +184,16 @@ class SpeechListener:
                         if self.on_command_captured:
                             self.on_command_captured(inline_command)
                     else:
+                        self._notify_status("Acknowledging...")
+                        if self.on_wake_detected:
+                            try:
+                                self.on_wake_detected()
+                            except Exception as ex:
+                                logger.warning("Wake acknowledgment error: %s", ex)
+
                         self._notify_status("Listening for command...")
                         logger.info("Listening for follow-up command...")
-                        command = self._capture_followup_command(timeout=6.0)
+                        command = self._capture_followup_command(timeout=8.0)
                         if command:
                             self._notify_status("Command recognized")
                             logger.info("Captured follow-up command: '%s'", command)

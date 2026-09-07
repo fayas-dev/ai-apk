@@ -38,11 +38,14 @@ def generate_pairing_qr_code(
     local_ip = get_local_ip()
     hostname = socket.gethostname()
 
+    local_ws = f"ws://{local_ip}:8765"
     pairing_data = {
         "app": "JARVIS",
         "version": "2.0",
-        "vps": vps_url,
+        "local_ws": local_ws,
         "local_ip": local_ip,
+        "port": 8765,
+        "vps": vps_url,
         "pc_name": hostname,
         "owner": "Muhammad Fayas",
         "pair_id": pair_id,

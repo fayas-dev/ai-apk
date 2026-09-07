@@ -65,3 +65,5 @@ Mobile_App/*.keystore
 PC_App/dist/
 PC_App/build/
 PC_App/*.spec
+*.apk
+*.exe

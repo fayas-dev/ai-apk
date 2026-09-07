@@ -281,26 +281,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF0E1624),
-        title: const Text('Pair PC via QR / Code', style: TextStyle(color: Color(0xFF00E5FF))),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '1. On your PC, open Jarvis PC App.\n2. Go to Voice & Settings.\n3. Your PC is already connected to VPS (45.131.64.32:2004).\n4. Mobile and PC pair automatically via the central VPS!',
-              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _serverController,
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-              decoration: const InputDecoration(
-                labelText: 'VPS WebSocket Endpoint',
-                labelStyle: TextStyle(color: Color(0xFF00E5FF)),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+        title: const Text('Connect to PC or Server', style: TextStyle(color: Color(0xFF00E5FF))),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Direct PC Connection (Recommended for Local Control):\n'
+                'Check your PC Jarvis app sidebar for the Direct IP (e.g. ws://192.168.1.X:8765) and enter it below:',
+                style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
               ),
-            ),
-          ],
+              const SizedBox(height: 14),
+              TextField(
+                controller: _serverController,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'WebSocket Server URL',
+                  labelStyle: const TextStyle(color: Color(0xFF00E5FF)),
+                  hintText: 'ws://192.168.1.X:8765',
+                  hintStyle: const TextStyle(color: Colors.white24),
+                  filled: true,
+                  fillColor: const Color(0xFF080D15),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFF00E5FF)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ActionChip(
+                    backgroundColor: const Color(0xFF142438),
+                    label: const Text('Use VPS Server', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11)),
+                    onPressed: () {
+                      _serverController.text = 'ws://45.131.64.32:2004/ws/jarvis';
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -310,10 +333,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF)),
             onPressed: () {
-              widget.wsService.connect(customUrl: _serverController.text.trim());
+              final target = _serverController.text.trim();
+              widget.wsService.connect(customUrl: target);
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Connected to Jarvis VPS')),
+                SnackBar(content: Text('Connecting to $target...')),
               );
             },
             child: const Text('Connect', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),

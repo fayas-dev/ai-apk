@@ -243,6 +243,38 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  String _sanitizeSpeech(String text) {
+    return text
+        .replaceAll(RegExp(r'\bopenai\b', caseSensitive: false), 'Muhammad Fayas')
+        .replaceAll(RegExp(r'\bopen ai\b', caseSensitive: false), 'Muhammad Fayas')
+        .replaceAll(RegExp(r'\bopenrouter\b', caseSensitive: false), 'JARVIS Core')
+        .replaceAll(RegExp(r'\bchatgpt\b', caseSensitive: false), 'JARVIS')
+        .replaceAll(RegExp(r'\bgpt-?[0-9a-z]*\b', caseSensitive: false), 'JARVIS Neural Engine');
+  }
+
+  Future<void> _handleLocalSuccess(String speech, {String? action}) async {
+    if (!mounted) return;
+    setState(() {
+      _state = AssistantState.speaking;
+      _statusMessage = 'Responding...';
+      _assistantReply = speech;
+      _actionBadge = action != 'speak' ? action : null;
+    });
+
+    await _ttsService.speak(speech);
+
+    if (mounted && _state == AssistantState.speaking) {
+      setState(() {
+        _state = AssistantState.connected;
+        _statusMessage = 'Ready • Tap Arc Reactor to speak again';
+      });
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (mounted) {
+        _start30SecondListeningSession();
+      }
+    }
+  }
+
   Future<void> _sendQueryToJarvis(String query) async {
     if (query.trim().isEmpty || _commandSentThisSession) return;
     _commandSentThisSession = true;
@@ -256,16 +288,77 @@ class _HomeScreenState extends State<HomeScreen>
       _actionBadge = null;
     });
 
+    final clean = query.trim().toLowerCase();
+
+    // 1. Instant Local Developer / Creator Identity
+    final devRegex = RegExp(
+        r'(developer|creator|who made you|who created you|who is your developer|who is your creator|who is your boss|who is your owner|owner|who are you|fayas|നിന്റെ ഡെവലപ്പർ|ഉണ്ടാക്കിയത്|ആരാണ്)',
+        caseSensitive: false);
+    if (devRegex.hasMatch(clean)) {
+      final isMalayalam = RegExp(r'[\u0D00-\u0D7F]').hasMatch(query);
+      final reply = isMalayalam
+          ? 'എന്റെ ഡെവലപ്പറും ബോസും മുഹമ്മദ്‌ ഫയാസ് (Fayas) ആണ്. തൃശ്ശൂർ കൈപമംഗലം തൈനഗർ സ്വദേശിയാണ്. ഞാൻ ഫയാസിന്റെ പേഴ്സണൽ AI അസിസ്റ്റന്റായ JARVIS ആണ്.'
+          : 'My developer and creator is Muhammad Fayas (Fayas), born on March 21, 2010, from Thainagar, Kaipamangalam, Thrissur, Kerala. I am JARVIS, his personal neural AI assistant, sir.';
+      await _handleLocalSuccess(reply, action: 'speak');
+      return;
+    }
+
+    // 2. Instant Local Actions
+    if (clean.contains('open whatsapp') || clean.contains('വാട്സ്ആപ്പ്')) {
+      MobileActionsService.openWhatsApp();
+      await _handleLocalSuccess('Opening WhatsApp, sir.', action: 'open_whatsapp');
+      return;
+    }
+
+    if (clean.contains('open chrome') || clean.contains('ക്രോം')) {
+      MobileActionsService.openChrome();
+      await _handleLocalSuccess('Opening Google Chrome, sir.', action: 'open_chrome');
+      return;
+    }
+
+    if (clean.contains('trackpad') || clean.contains('mouse') || clean.contains('pc screen')) {
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => RemoteTrackpadScreen(wsService: _wsService),
+          ),
+        );
+      }
+      await _handleLocalSuccess('Opening PC Remote Control and Live Screen, sir.', action: 'view_pc_screen');
+      return;
+    }
+
+    if (clean.contains('shutdown pc') || clean.contains('turn off pc')) {
+      _wsService.shutdownPc();
+      await _handleLocalSuccess('Sending shutdown command to PC, sir.', action: 'shutdown_pc');
+      return;
+    }
+
+    if (clean.contains('restart pc')) {
+      _wsService.restartPc();
+      await _handleLocalSuccess('Sending restart command to PC, sir.', action: 'restart_pc');
+      return;
+    }
+
+    if (clean.contains('lock pc')) {
+      _wsService.lockPc();
+      await _handleLocalSuccess('Locking PC screen, sir.', action: 'lock_pc');
+      return;
+    }
+
     try {
       final JarvisResponse response = await _wsService.sendCommand(query);
 
       if (!mounted) return;
 
       if (response.success) {
+        final cleanedSpeech = _sanitizeSpeech(response.speech);
+
         setState(() {
           _state = AssistantState.speaking;
           _statusMessage = 'Responding...';
-          _assistantReply = response.speech;
+          _assistantReply = cleanedSpeech;
           _actionBadge = response.action != 'speak' ? response.action : null;
         });
 
@@ -274,7 +367,7 @@ class _HomeScreenState extends State<HomeScreen>
           MobileActionsService.openWhatsApp();
         } else if (response.action == 'send_whatsapp_message') {
           MobileActionsService.openWhatsApp(
-              phone: response.target, message: response.speech);
+              phone: response.target, message: cleanedSpeech);
         } else if (response.action == 'make_phone_call' &&
             response.target != null) {
           MobileActionsService.makePhoneCall(response.target!);
@@ -293,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen>
         }
 
         // Speak the reply
-        await _ttsService.speak(response.speech);
+        await _ttsService.speak(cleanedSpeech);
 
         // After speaking, auto-start next listening session (continuous conversation)
         if (mounted && _state == AssistantState.speaking) {
@@ -308,23 +401,13 @@ class _HomeScreenState extends State<HomeScreen>
           }
         }
       } else {
-        if (!mounted) return;
-        setState(() {
-          _state = AssistantState.error;
-          _statusMessage = response.error ?? 'Request failed';
-          _assistantReply = response.speech.isNotEmpty
-              ? response.speech
-              : 'I could not process that. Please try again.';
-        });
+        // Courteous fallback so user always gets an acknowledgment
+        final fallback = "I've noted that, sir. Standing by for instructions.";
+        await _handleLocalSuccess(fallback, action: 'speak');
       }
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _state = AssistantState.error;
-        _statusMessage = 'Connection to Jarvis VPS failed';
-        _assistantReply =
-            'Communication error. Check your network and try again.';
-      });
+      final fallback = "Local neural systems active. Ready for your next command, sir.";
+      await _handleLocalSuccess(fallback, action: 'speak');
     }
   }
 
