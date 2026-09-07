@@ -67,9 +67,13 @@ def build_executable():
         "--hidden-import=pyttsx3.drivers.sapi5",
         "--hidden-import=pyttsx3.drivers.dummy",
         "--hidden-import=pystray",
+        "--hidden-import=pystray._base",
+        "--hidden-import=pystray.backends",
+        "--hidden-import=pystray.backends._win32",
         "--hidden-import=sounddevice",
         "--hidden-import=numpy",
         "--hidden-import=speech_recognition",
+        "--hidden-import=pyautogui",
         "--hidden-import=PIL",
         "--hidden-import=PIL._tkinter_finder",
     ]

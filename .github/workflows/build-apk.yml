@@ -1,0 +1,75 @@
+name: Build Jarvis Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+    
+    - name: Get Flutter dependencies
+      working-directory: Mobile_App
+      run: flutter pub get
+    
+    - name: Build APK
+      working-directory: Mobile_App
+      run: flutter build apk --release
+    
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: jarvis-release-apk
+        path: Mobile_App/build/app/outputs/flutter-apk/app-release.apk
+        retention-days: 30
+    
+    - name: Create Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: Mobile_App/build/app/outputs/flutter-apk/app-release.apk
+        tag_name: v${{ github.run_number }}
+        name: Jarvis AI Mobile v${{ github.run_number }}
+        body: |
+          🤖 **JARVIS AI Assistant - Mobile App Release**
+          
+          **Owner**: Muhammad Fayas (21/03/2010, Kaipamangalam, Thrissur, Kerala)
+          
+          **Features**:
+          - ✅ Malayalam & English voice support
+          - ✅ PC Remote Control (mouse, keyboard, screen view)
+          - ✅ Live PC screen streaming
+          - ✅ Virtual trackpad & keyboard
+          - ✅ Quick PC actions (shutdown, restart, lock)
+          - ✅ Mobile actions (WhatsApp, Chrome)
+          - ✅ Male voice synthesis tuning
+          
+          **Installation**:
+          1. Download `app-release.apk`
+          2. Enable "Install from Unknown Sources" in Android settings
+          3. Install the APK
+          4. Connect to VPS: `ws://45.131.64.32:2004/ws/jarvis`
+          
+          Built automatically via GitHub Actions ⚡
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

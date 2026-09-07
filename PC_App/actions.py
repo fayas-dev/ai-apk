@@ -36,9 +36,12 @@ SAFE_APP_MAP = {
 }
 
 
-def open_chrome(target: Optional[str] = None) -> Tuple[bool, str]:
+def open_chrome(target: Optional[str] = None, speak_callback: Optional[Callable[[str], None]] = None) -> Tuple[bool, str]:
     """Reliably opens Google Chrome."""
     logger.info("Executing action: open_chrome")
+    speech = "Opening Google Chrome, sir."
+    if speak_callback:
+        speak_callback(speech)
     try:
         # Common Chrome paths on Windows
         chrome_paths = [

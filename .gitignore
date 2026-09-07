@@ -1,53 +1,67 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.pyc
+*$py.class
+*.so
 .Python
-env/
-venv/
-.venv/
-*.egg-info/
-dist/
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
 .eggs/
-
-# PyInstaller
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 *.spec
-dist/
-build/
+
+# Virtual Environment
+venv/
+ENV/
+env/
 
 # IDE
 .vscode/
 .idea/
-*.iml
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+*.env
 
 # Flutter/Dart
 Mobile_App/.dart_tool/
 Mobile_App/.flutter-plugins
 Mobile_App/.flutter-plugins-dependencies
 Mobile_App/.packages
+Mobile_App/.pub-cache/
+Mobile_App/.pub/
 Mobile_App/build/
-Mobile_App/pubspec.lock
+Mobile_App/ios/
 Mobile_App/android/.gradle/
+Mobile_App/android/app/*.iml
 Mobile_App/android/local.properties
 Mobile_App/android/key.properties
-Mobile_App/android/app/google-services.json
+Mobile_App/*.keystore
 
-# Environment secrets
-.env
-*.env
-VPS/.env
-
-# Generated APKs & Archives
-*.apk
-*.zip
-Mobile_App/Release_APK/
-
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
-*.log
-
+# PC App Build
+PC_App/dist/
+PC_App/build/
+PC_App/*.spec
