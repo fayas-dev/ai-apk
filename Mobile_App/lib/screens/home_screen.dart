@@ -37,11 +37,17 @@ class _HomeScreenState extends State<HomeScreen>
   AssistantState _state = AssistantState.connecting;
   String _statusMessage = 'Connecting to Jarvis VPS...';
   String _userTranscript = '';
-  String _assistantReply = 'Greetings. Tap my Arc Reactor to speak.';
+  String _assistantReply = 'Greetings, Fayas. Tap the Arc Reactor to speak.';
   String? _actionBadge;
 
   StreamSubscription? _wsStateSubscription;
   StreamSubscription? _speechStateSubscription;
+  Timer? _conversationTimer;
+  Timer? _silenceTimer;
+
+  // Track last partial text to detect "silence" when STT stalls
+  String _lastPartialText = '';
+  bool _commandSentThisSession = false;
 
   final TextEditingController _textController = TextEditingController();
 
@@ -49,7 +55,6 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
 
-    // Pulse animation for glowing Arc Reactor / logo
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
@@ -80,7 +85,7 @@ class _HomeScreenState extends State<HomeScreen>
           if (_state == AssistantState.connecting ||
               _state == AssistantState.disconnected) {
             _state = AssistantState.connected;
-            _statusMessage = 'VPS Connected (45.131.64.32:2004)';
+            _statusMessage = 'VPS Connected • 45.131.64.32:2004';
           }
         } else if (status == ConnectionStateStatus.connecting) {
           _state = AssistantState.connecting;
@@ -94,18 +99,34 @@ class _HomeScreenState extends State<HomeScreen>
 
     _speechStateSubscription = _speechService.statusStream.listen((status) {
       if (!mounted) return;
-      if (status == SpeechStateStatus.permissionDenied) {
+      if (status == SpeechStateStatus.permissionDenied ||
+          status == SpeechStateStatus.permissionPermanentlyDenied) {
         setState(() {
           _state = AssistantState.error;
           _statusMessage = 'Microphone permission denied';
           _assistantReply =
-              'Please grant microphone permission in device settings.';
+              'Please grant microphone permission in Android Settings → Apps → Jarvis → Permissions.';
         });
       } else if (status == SpeechStateStatus.unavailable) {
         setState(() {
           _state = AssistantState.error;
-          _statusMessage = 'Speech recognition unavailable';
+          _statusMessage = 'Speech recognition unavailable on this device';
         });
+      } else if (status == SpeechStateStatus.done) {
+        // STT session ended — if we have text and haven't sent yet, send it
+        if (_state == AssistantState.listening &&
+            !_commandSentThisSession &&
+            _userTranscript.trim().isNotEmpty) {
+          _sendQueryToJarvis(_userTranscript.trim());
+        } else if (_state == AssistantState.listening &&
+            !_commandSentThisSession) {
+          setState(() {
+            _state = _wsService.currentStatus == ConnectionStateStatus.connected
+                ? AssistantState.connected
+                : AssistantState.disconnected;
+            _statusMessage = 'Mic closed. Tap Arc Reactor to speak again.';
+          });
+        }
       }
     });
   }
@@ -116,6 +137,7 @@ class _HomeScreenState extends State<HomeScreen>
     _wsStateSubscription?.cancel();
     _speechStateSubscription?.cancel();
     _conversationTimer?.cancel();
+    _silenceTimer?.cancel();
     _wsService.dispose();
     _speechService.dispose();
     _ttsService.dispose();
@@ -123,15 +145,14 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  Timer? _conversationTimer;
-
   Future<void> _handleJarvisTap() async {
     if (_state == AssistantState.listening) {
-      // User tapped while listening -> cancel or send
+      // User tapped while listening → send what we have or cancel
       _conversationTimer?.cancel();
+      _silenceTimer?.cancel();
       await _speechService.stopListening();
-      if (_userTranscript.trim().isNotEmpty) {
-        _sendQueryToJarvis(_userTranscript);
+      if (_userTranscript.trim().isNotEmpty && !_commandSentThisSession) {
+        _sendQueryToJarvis(_userTranscript.trim());
       } else {
         setState(() {
           _state = _wsService.currentStatus == ConnectionStateStatus.connected
@@ -145,6 +166,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     if (_state == AssistantState.speaking) {
       _conversationTimer?.cancel();
+      _silenceTimer?.cancel();
       await _ttsService.stop();
       setState(() {
         _state = AssistantState.connected;
@@ -158,43 +180,74 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _start30SecondListeningSession() {
     _conversationTimer?.cancel();
+    _silenceTimer?.cancel();
+    _commandSentThisSession = false;
+    _lastPartialText = '';
+
     if (!mounted) return;
 
     setState(() {
       _state = AssistantState.listening;
-      _statusMessage = 'Active conversation (30s)... Speak freely';
+      _statusMessage = 'Listening... Speak now (30s)';
       _userTranscript = '';
     });
 
-    // 30 second conversational timer - if user says nothing within 30s, turn off mic
+    // Hard 30-second timeout — mic closes even if user keeps talking
     _conversationTimer = Timer(const Duration(seconds: 30), () async {
+      if (_state != AssistantState.listening) return;
       await _speechService.stopListening();
       if (!mounted) return;
-      setState(() {
-        _state = _wsService.currentStatus == ConnectionStateStatus.connected
-            ? AssistantState.connected
-            : AssistantState.disconnected;
-        _statusMessage = 'Session closed (30s timeout). Tap Arc Reactor to speak';
-      });
+      if (_userTranscript.trim().isNotEmpty && !_commandSentThisSession) {
+        _sendQueryToJarvis(_userTranscript.trim());
+      } else if (!_commandSentThisSession) {
+        setState(() {
+          _state = _wsService.currentStatus == ConnectionStateStatus.connected
+              ? AssistantState.connected
+              : AssistantState.disconnected;
+          _statusMessage = '30s timeout. Tap Arc Reactor to speak.';
+        });
+      }
     });
 
     _speechService.startListening(
       onResult: (text, isFinal) {
-        if (!mounted) return;
+        if (!mounted || _commandSentThisSession) return;
+
         setState(() {
           _userTranscript = text;
         });
-        if (isFinal && text.trim().isNotEmpty) {
+
+        if (text.trim().isNotEmpty) {
+          _lastPartialText = text;
+
+          // Reset silence detection timer on every new word
+          _silenceTimer?.cancel();
+          _silenceTimer = Timer(const Duration(milliseconds: 1800), () {
+            // 1.8s of silence after last word → auto-send
+            if (_state == AssistantState.listening &&
+                !_commandSentThisSession &&
+                _userTranscript.trim().isNotEmpty) {
+              _speechService.stopListening();
+              _sendQueryToJarvis(_userTranscript.trim());
+            }
+          });
+        }
+
+        // Also send immediately on confirmed final result
+        if (isFinal && text.trim().isNotEmpty && !_commandSentThisSession) {
+          _silenceTimer?.cancel();
           _conversationTimer?.cancel();
-          _sendQueryToJarvis(text);
+          _sendQueryToJarvis(text.trim());
         }
       },
     );
   }
 
   Future<void> _sendQueryToJarvis(String query) async {
-    if (query.trim().isEmpty) return;
+    if (query.trim().isEmpty || _commandSentThisSession) return;
+    _commandSentThisSession = true;
     _conversationTimer?.cancel();
+    _silenceTimer?.cancel();
 
     setState(() {
       _state = AssistantState.processing;
@@ -216,43 +269,61 @@ class _HomeScreenState extends State<HomeScreen>
           _actionBadge = response.action != 'speak' ? response.action : null;
         });
 
-        await _ttsService.speak(response.speech);
-
-        // Execute native mobile actions if applicable
+        // Execute native mobile actions
         if (response.action == 'open_whatsapp') {
           MobileActionsService.openWhatsApp();
         } else if (response.action == 'send_whatsapp_message') {
-          MobileActionsService.openWhatsApp(phone: response.target, message: response.speech);
-        } else if (response.action == 'make_phone_call' && response.target != null) {
+          MobileActionsService.openWhatsApp(
+              phone: response.target, message: response.speech);
+        } else if (response.action == 'make_phone_call' &&
+            response.target != null) {
           MobileActionsService.makePhoneCall(response.target!);
         } else if (response.action == 'open_chrome') {
           MobileActionsService.openChrome();
-        } else if (response.action == 'view_pc_screen' || response.action == 'mouse_control') {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => RemoteTrackpadScreen(wsService: _wsService),
-            ),
-          );
+        } else if (response.action == 'view_pc_screen' ||
+            response.action == 'mouse_control') {
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => RemoteTrackpadScreen(wsService: _wsService),
+              ),
+            );
+          }
         }
 
-        if (mounted) {
-          // Keep microphone active for up to 30s for continuous conversation
-          _start30SecondListeningSession();
+        // Speak the reply
+        await _ttsService.speak(response.speech);
+
+        // After speaking, auto-start next listening session (continuous conversation)
+        if (mounted && _state == AssistantState.speaking) {
+          setState(() {
+            _state = AssistantState.connected;
+            _statusMessage = 'Ready • Tap Arc Reactor to speak again';
+          });
+          // Short delay then re-listen for seamless conversation
+          await Future.delayed(const Duration(milliseconds: 600));
+          if (mounted) {
+            _start30SecondListeningSession();
+          }
         }
       } else {
+        if (!mounted) return;
         setState(() {
           _state = AssistantState.error;
           _statusMessage = response.error ?? 'Request failed';
-          _assistantReply = response.speech;
+          _assistantReply = response.speech.isNotEmpty
+              ? response.speech
+              : 'I could not process that. Please try again.';
         });
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _state = AssistantState.error;
-        _statusMessage = 'Error connecting to Jarvis VPS';
-        _assistantReply = 'Communication failed. Please check network connection.';
+        _statusMessage = 'Connection to Jarvis VPS failed';
+        _assistantReply =
+            'Communication error. Check your network and try again.';
       });
     }
   }
@@ -260,37 +331,37 @@ class _HomeScreenState extends State<HomeScreen>
   Color _getStatusColor() {
     switch (_state) {
       case AssistantState.connected:
-        return const Color(0xFF00E5FF); // Neon Cyan
+        return const Color(0xFF00E5FF);
       case AssistantState.connecting:
-        return const Color(0xFFFFB300); // Amber
+        return const Color(0xFFFFB300);
       case AssistantState.listening:
-        return const Color(0xFF00FF88); // Neon Green
+        return const Color(0xFF00FF88);
       case AssistantState.processing:
-        return const Color(0xFFBD00FF); // Futuristic Purple
+        return const Color(0xFFBD00FF);
       case AssistantState.speaking:
-        return const Color(0xFF00B0FF); // Light Blue
+        return const Color(0xFF00B0FF);
       case AssistantState.disconnected:
       case AssistantState.error:
-        return const Color(0xFFFF3366); // Neon Red/Pink
+        return const Color(0xFFFF3366);
     }
   }
 
   String _getStateLabel() {
     switch (_state) {
       case AssistantState.connected:
-        return '● VPS Connected';
+        return '● ONLINE';
       case AssistantState.connecting:
-        return '○ Connecting to VPS...';
+        return '○ CONNECTING';
       case AssistantState.listening:
-        return '● Listening...';
+        return '◉ LISTENING';
       case AssistantState.processing:
-        return '● Processing...';
+        return '◎ PROCESSING';
       case AssistantState.speaking:
-        return '● Speaking...';
+        return '▶ SPEAKING';
       case AssistantState.disconnected:
-        return '○ VPS Disconnected';
+        return '○ OFFLINE';
       case AssistantState.error:
-        return '● Error';
+        return '● ERROR';
     }
   }
 
@@ -300,6 +371,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Scaffold(
       backgroundColor: const Color(0xFF070B12),
+      resizeToAvoidBottomInset: true,
       body: Container(
         decoration: const BoxDecoration(
           gradient: RadialGradient(
@@ -315,9 +387,10 @@ class _HomeScreenState extends State<HomeScreen>
         child: SafeArea(
           child: Column(
             children: [
-              // Top Header
+              // ── Top Header ──────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -328,67 +401,64 @@ class _HomeScreenState extends State<HomeScreen>
                           'JARVIS',
                           style: TextStyle(
                             color: Color(0xFF00E5FF),
-                            fontSize: 26,
+                            fontSize: 28,
                             fontWeight: FontWeight.w900,
-                            letterSpacing: 4.0,
+                            letterSpacing: 5.0,
                           ),
                         ),
                         Text(
-                          'MARK VII // NEURAL AI OS',
+                          'NEURAL AI  //  MARK VII',
                           style: TextStyle(
                             color: Colors.white38,
-                            fontSize: 10,
+                            fontSize: 9,
                             fontWeight: FontWeight.w600,
-                            letterSpacing: 1.5,
+                            letterSpacing: 2.0,
                           ),
                         ),
                       ],
                     ),
                     Row(
                       children: [
-                        // Remote PC Trackpad Button
-                        IconButton(
-                          icon: const Icon(Icons.laptop_chromebook_rounded, color: Color(0xFF00E5FF), size: 22),
+                        _TopIconButton(
+                          icon: Icons.laptop_chromebook_rounded,
                           tooltip: 'PC Remote Control',
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => RemoteTrackpadScreen(wsService: _wsService),
-                              ),
-                            );
-                          },
-                        ),
-                        // Settings Button
-                        IconButton(
-                          icon: const Icon(Icons.settings_rounded, color: Color(0xFF00E5FF), size: 22),
-                          tooltip: 'Jarvis Settings',
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => SettingsScreen(
-                                  wsService: _wsService,
-                                  ttsService: _ttsService,
-                                ),
-                              ),
-                            );
-                          },
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  RemoteTrackpadScreen(wsService: _wsService),
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 4),
-                        // VPS Status Badge
+                        _TopIconButton(
+                          icon: Icons.settings_rounded,
+                          tooltip: 'Settings',
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => SettingsScreen(
+                                wsService: _wsService,
+                                ttsService: _ttsService,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Status badge
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
-                            color: statusColor.withOpacity(0.12),
+                            color: statusColor.withOpacity(0.10),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                              color: statusColor.withOpacity(0.5),
+                              color: statusColor.withOpacity(0.45),
                               width: 1,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: statusColor.withOpacity(0.25),
+                                color: statusColor.withOpacity(0.2),
                                 blurRadius: 10,
                                 spreadRadius: 1,
                               ),
@@ -398,9 +468,9 @@ class _HomeScreenState extends State<HomeScreen>
                             _getStateLabel(),
                             style: TextStyle(
                               color: statusColor,
-                              fontSize: 11,
+                              fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
+                              letterSpacing: 1.2,
                             ),
                           ),
                         ),
@@ -412,36 +482,38 @@ class _HomeScreenState extends State<HomeScreen>
 
               const Spacer(),
 
-              // Glowing Central Jarvis Button / Arc Reactor
+              // ── Arc Reactor Button ───────────────────────────────
               GestureDetector(
                 onTap: _handleJarvisTap,
                 child: AnimatedBuilder(
                   animation: _pulseAnimation,
                   builder: (context, child) {
-                    final pulseValue = _pulseAnimation.value;
-                    final activeGlow = _state == AssistantState.listening ||
+                    final pv = _pulseAnimation.value;
+                    final active = _state == AssistantState.listening ||
                         _state == AssistantState.processing ||
                         _state == AssistantState.speaking;
-                    final glowRadius = activeGlow ? 40.0 + (pulseValue * 25.0) : 20.0 + (pulseValue * 10.0);
+                    final glowR = active ? 40.0 + pv * 28 : 18.0 + pv * 8;
 
                     return Stack(
                       alignment: Alignment.center,
                       children: [
-                        // Outer Pulsing Neon Rings
+                        // Outermost ring
                         Container(
-                          width: 240 + (pulseValue * 15),
-                          height: 240 + (pulseValue * 15),
+                          width: 245 + pv * 18,
+                          height: 245 + pv * 18,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: statusColor.withValues(alpha: 0.15 + (pulseValue * 0.2)),
+                              color: statusColor
+                                  .withOpacity(0.10 + pv * 0.18),
                               width: 1.5,
                             ),
                           ),
                         ),
+                        // Middle ring
                         Container(
-                          width: 210,
-                          height: 210,
+                          width: 212,
+                          height: 212,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(
@@ -450,34 +522,35 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: statusColor.withValues(alpha: activeGlow ? 0.6 : 0.25),
-                                blurRadius: glowRadius,
-                                spreadRadius: activeGlow ? 4 : 1,
+                                color: statusColor
+                                    .withOpacity(active ? 0.55 : 0.22),
+                                blurRadius: glowR,
+                                spreadRadius: active ? 4 : 1,
                               ),
                             ],
                           ),
                         ),
-                        // Inner Button Container with Jarvis Logo
+                        // Inner arc reactor circle
                         Container(
-                          width: 175,
-                          height: 175,
+                          width: 178,
+                          height: 178,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             gradient: RadialGradient(
                               colors: [
-                                statusColor.withOpacity(0.3),
+                                statusColor.withOpacity(0.28),
                                 const Color(0xFF0F1B2B),
                                 const Color(0xFF060B12),
                               ],
                             ),
                             border: Border.all(
-                              color: statusColor.withOpacity(0.8),
-                              width: 3.0,
+                              color: statusColor.withOpacity(0.85),
+                              width: 2.5,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: statusColor.withOpacity(0.5),
-                                blurRadius: 20,
+                                color: statusColor.withOpacity(0.45),
+                                blurRadius: 22,
                               ),
                             ],
                           ),
@@ -487,13 +560,15 @@ class _HomeScreenState extends State<HomeScreen>
                               child: Image.asset(
                                 'images/logo.png',
                                 fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Icon(
-                                    Icons.mic,
-                                    size: 60,
-                                    color: statusColor,
-                                  );
-                                },
+                                errorBuilder: (_, __, ___) => Icon(
+                                  _state == AssistantState.listening
+                                      ? Icons.mic
+                                      : _state == AssistantState.processing
+                                          ? Icons.memory
+                                          : Icons.mic_none_rounded,
+                                  size: 64,
+                                  color: statusColor,
+                                ),
                               ),
                             ),
                           ),
@@ -504,138 +579,140 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 26),
 
-              // Tap Prompt / Status Label
+              // ── Tap prompt ──────────────────────────────────────
               Text(
                 _state == AssistantState.listening
                     ? 'Listening... Tap to send'
-                    : (_state == AssistantState.speaking
-                        ? 'Jarvis is speaking... Tap to stop'
-                        : 'Tap to Speak'),
+                    : _state == AssistantState.speaking
+                        ? 'Speaking... Tap to stop'
+                        : _state == AssistantState.processing
+                            ? 'Processing your command...'
+                            : 'Tap Arc Reactor to speak',
                 style: TextStyle(
                   color: statusColor,
-                  fontSize: 16,
+                  fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  letterSpacing: 1.5,
+                  letterSpacing: 1.2,
                 ),
               ),
-
-              const SizedBox(height: 8),
-
+              const SizedBox(height: 6),
               Text(
                 _statusMessage,
-                style: const TextStyle(
-                  color: Colors.white54,
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
+                textAlign: TextAlign.center,
               ),
 
               const Spacer(),
 
-              // Glassmorphic Response Panel
+              // ── Glassmorphic Response Panel ─────────────────────
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: Container(
                   width: double.infinity,
-                  constraints: const BoxConstraints(minHeight: 120),
-                  padding: const EdgeInsets.all(18),
+                  constraints: const BoxConstraints(minHeight: 100, maxHeight: 200),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF101926).withOpacity(0.85),
-                    borderRadius: BorderRadius.circular(16),
+                    color: const Color(0xFF101926).withOpacity(0.88),
+                    borderRadius: BorderRadius.circular(18),
                     border: Border.all(
-                      color: const Color(0xFF00E5FF).withOpacity(0.25),
+                      color: const Color(0xFF00E5FF).withOpacity(0.22),
                       width: 1,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.6),
-                        blurRadius: 15,
+                        color: Colors.black.withOpacity(0.55),
+                        blurRadius: 16,
                         offset: const Offset(0, 6),
                       ),
                     ],
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: const [
-                              Icon(Icons.terminal, color: Color(0xFF00E5FF), size: 16),
-                              SizedBox(width: 8),
-                              Text(
-                                'NEURAL FEEDBACK',
-                                style: TextStyle(
-                                  color: Color(0xFF00E5FF),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 1.5,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.terminal,
+                                    color: Color(0xFF00E5FF), size: 15),
+                                SizedBox(width: 7),
+                                Text(
+                                  'JARVIS RESPONSE',
+                                  style: TextStyle(
+                                    color: Color(0xFF00E5FF),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1.8,
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          if (_actionBadge != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF00E5FF).withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: const Color(0xFF00E5FF).withOpacity(0.4),
-                                ),
-                              ),
-                              child: Text(
-                                _actionBadge!.toUpperCase(),
-                                style: const TextStyle(
-                                  color: Color(0xFF00E5FF),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                              ],
                             ),
+                            if (_actionBadge != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF00FF88).withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: const Color(0xFF00FF88).withOpacity(0.4),
+                                  ),
+                                ),
+                                child: Text(
+                                  _actionBadge!.toUpperCase(),
+                                  style: const TextStyle(
+                                    color: Color(0xFF00FF88),
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        if (_userTranscript.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'You: "$_userTranscript"',
+                            style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 13,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
                         ],
-                      ),
-                      if (_userTranscript.isNotEmpty) ...[
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 8),
                         Text(
-                          'You: "$_userTranscript"',
+                          _assistantReply,
                           style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 13,
-                            fontStyle: FontStyle.italic,
+                            color: Colors.white,
+                            fontSize: 14,
+                            height: 1.45,
+                            fontWeight: FontWeight.w400,
                           ),
                         ),
                       ],
-                      const SizedBox(height: 8),
-                      Text(
-                        _assistantReply,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          height: 1.4,
-                          fontWeight: FontWeight.w400,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
 
-              // Manual Text Input Fallback Bar
+              // ── Text input fallback ─────────────────────────────
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                 child: Container(
                   decoration: BoxDecoration(
                     color: const Color(0xFF0B121C),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.white12,
-                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.white10),
                   ),
                   child: Row(
                     children: [
@@ -643,25 +720,29 @@ class _HomeScreenState extends State<HomeScreen>
                       Expanded(
                         child: TextField(
                           controller: _textController,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 14),
                           decoration: const InputDecoration(
-                            hintText: 'Type a command (e.g. open chrome)...',
-                            hintStyle: TextStyle(color: Colors.white30, fontSize: 13),
+                            hintText: 'Type a command...',
+                            hintStyle:
+                                TextStyle(color: Colors.white24, fontSize: 13),
                             border: InputBorder.none,
                           ),
-                          onSubmitted: (value) {
-                            if (value.trim().isNotEmpty) {
-                              _sendQueryToJarvis(value.trim());
+                          onSubmitted: (v) {
+                            if (v.trim().isNotEmpty) {
+                              _sendQueryToJarvis(v.trim());
                               _textController.clear();
                             }
                           },
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.send_rounded, color: Color(0xFF00E5FF), size: 20),
+                        icon: const Icon(Icons.send_rounded,
+                            color: Color(0xFF00E5FF), size: 20),
                         onPressed: () {
-                          if (_textController.text.trim().isNotEmpty) {
-                            _sendQueryToJarvis(_textController.text.trim());
+                          final v = _textController.text.trim();
+                          if (v.isNotEmpty) {
+                            _sendQueryToJarvis(v);
                             _textController.clear();
                           }
                         },
@@ -672,6 +753,41 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small top header icon button
+class _TopIconButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  const _TopIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(
+            color: const Color(0xFF00E5FF).withOpacity(0.06),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: const Color(0xFF00E5FF).withOpacity(0.18),
+            ),
+          ),
+          child: Icon(icon, color: const Color(0xFF00E5FF), size: 20),
         ),
       ),
     );

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
@@ -36,7 +37,27 @@ class JarvisSpeechService {
 
   bool get isListening => _speech.isListening;
 
+  /// Request microphone permission explicitly before initializing STT.
+  Future<bool> _requestMicPermission() async {
+    try {
+      final status = await Permission.microphone.request();
+      if (status == PermissionStatus.granted) return true;
+      if (status == PermissionStatus.permanentlyDenied) {
+        _updateStatus(SpeechStateStatus.permissionPermanentlyDenied);
+      } else {
+        _updateStatus(SpeechStateStatus.permissionDenied);
+      }
+      return false;
+    } catch (_) {
+      return true; // Fallback: let STT handle it
+    }
+  }
+
   Future<bool> initialize() async {
+    // Explicitly request mic permission first
+    final hasPerm = await _requestMicPermission();
+    if (!hasPerm) return false;
+
     try {
       _isAvailable = await _speech.initialize(
         onStatus: _onSpeechStatus,
@@ -48,7 +69,7 @@ class JarvisSpeechService {
         _updateStatus(SpeechStateStatus.ready);
         return true;
       } else {
-        if (_speech.hasPermission == false) {
+        if (!_speech.hasPermission) {
           _updateStatus(SpeechStateStatus.permissionDenied);
         } else {
           _updateStatus(SpeechStateStatus.unavailable);
@@ -70,8 +91,18 @@ class JarvisSpeechService {
   }
 
   void _onSpeechError(SpeechRecognitionError errorNotification) {
-    if (errorNotification.errorMsg.contains('error_permission')) {
+    // Ignore no_match - it just means silence, not a real error
+    if (errorNotification.errorMsg.contains('error_no_match') ||
+        errorNotification.errorMsg.contains('no_match')) {
+      return;
+    }
+    if (errorNotification.errorMsg.contains('error_permission') ||
+        errorNotification.errorMsg.contains('permission')) {
       _updateStatus(SpeechStateStatus.permissionDenied);
+    } else if (errorNotification.errorMsg.contains('error_speech_timeout') ||
+        errorNotification.errorMsg.contains('speech_timeout')) {
+      // Timeout is normal — don't emit error
+      _updateStatus(SpeechStateStatus.done);
     } else {
       _updateStatus(SpeechStateStatus.error);
     }
@@ -97,17 +128,21 @@ class JarvisSpeechService {
     try {
       await _speech.listen(
         onResult: (result) {
-          _lastRecognizedWords = result.recognizedWords;
+          final words = result.recognizedWords;
+          _lastRecognizedWords = words;
           if (!_wordsController.isClosed) {
-            _wordsController.add(_lastRecognizedWords);
+            _wordsController.add(words);
           }
-          onResult(result.recognizedWords, result.finalResult);
+          // Always call with partial results so the user sees live transcription.
+          // isFinal = true when STT confirms the utterance is complete.
+          onResult(words, result.finalResult);
         },
         listenFor: const Duration(seconds: 30),
+        // pauseFor: how long silence before auto-finalizing (4s is best)
         pauseFor: const Duration(seconds: 4),
         partialResults: true,
-        cancelOnError: true,
-        listenMode: ListenMode.confirmation,
+        cancelOnError: false,  // Don't cancel on minor errors like no_match
+        listenMode: ListenMode.dictation,  // Dictation keeps mic open longer
       );
       _updateStatus(SpeechStateStatus.listening);
     } catch (e) {

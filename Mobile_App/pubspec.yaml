@@ -1,7 +1,7 @@
 name: jarvis_mobile
 description: Jarvis Voice AI Assistant Mobile Client for Android
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -13,6 +13,7 @@ dependencies:
   flutter_tts: ^3.8.5
   web_socket_channel: ^2.4.1
   url_launcher: ^6.3.0
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

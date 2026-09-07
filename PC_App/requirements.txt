@@ -8,3 +8,4 @@ pyinstaller
 pyttsx3
 pystray
 Pillow
+qrcode
