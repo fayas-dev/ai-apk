@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, Optional, Set
 
 import websockets
 
-from actions import execute_action
+from actions import check_and_handle_confirmation, execute_action
 from config import JARVIS_DEVICE_TOKEN
 from intent_engine import evaluate_local_intent, sanitize_speech_reply
 from remote_controller import RemoteController
@@ -188,6 +188,24 @@ class LocalDirectServer:
         if msg_type == "command":
             request_id = data.get("request_id", "")
             text = data.get("text", "")
+
+            # 0. Check for a pending destructive-action confirmation
+            # (e.g. shutdown/restart asked for a "yes"/"no" from this same
+            # paired device) before anything else.
+            confirm_res = check_and_handle_confirmation(text)
+            if confirm_res is not None:
+                success, msg = confirm_res
+                await ws.send(
+                    json.dumps({
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": success,
+                        "action": "speak",
+                        "target": None,
+                        "speech": msg,
+                    })
+                )
+                return
 
             # Check local intent first
             local_res = evaluate_local_intent(text)

@@ -7,6 +7,7 @@ Prevents arbitrary command execution and enforces confirmation for destructive a
 import ctypes
 import logging
 import os
+import re
 import subprocess
 import sys
 import webbrowser
@@ -491,20 +492,39 @@ def check_and_handle_confirmation(user_text: str) -> Optional[Tuple[bool, str]]:
         return None
 
     cleaned = user_text.strip().lower()
-    confirm_words = ("yes", "yeah", "sure", "confirm", "proceed", "do it", "shut down", "restart")
-    cancel_words = ("no", "cancel", "stop", "abort", "don't", "nevermind")
 
-    if any(w in cleaned for w in confirm_words):
+    # Word-boundary regex patterns so "no" doesn't match inside "not now",
+    # and "shut down"/"restart" doesn't match inside a cancellation like
+    # "don't shut down". Cancellation is intentionally checked BEFORE
+    # confirmation, because a phrase like "don't shut down" contains the
+    # confirm phrase "shut down" as a substring and must not be treated
+    # as a confirmation.
+    cancel_patterns = (
+        r"\bno\b", r"\bnope\b", r"\bcancel\b", r"\bstop\b", r"\babort\b",
+        r"don'?t", r"\bnever\s*mind\b",
+    )
+    # NOTE: action-name words ("shut down", "restart") are intentionally NOT
+    # treated as generic confirmations. If a shutdown is pending and the user
+    # says "restart" (meaning "do that instead", not "yes"), matching on the
+    # word alone would silently execute the *pending shutdown* rather than
+    # what the user actually asked for. "yes"/"confirm"/"do it" etc. are
+    # unambiguous confirmations regardless of which action is pending.
+    confirm_patterns = (
+        r"\byes\b", r"\byeah\b", r"\byep\b", r"\bsure\b", r"\bconfirm\b",
+        r"\bproceed\b", r"\bdo it\b", r"\bgo ahead\b",
+    )
+
+    if any(re.search(p, cleaned) for p in cancel_patterns):
+        logger.info("User cancelled pending action: %s", _PENDING_CONFIRMATION)
+        _PENDING_CONFIRMATION = None
+        return True, "Action cancelled. Standing by."
+    elif any(re.search(p, cleaned) for p in confirm_patterns):
         action_name = _PENDING_CONFIRMATION
         _PENDING_CONFIRMATION = None
         func = ACTION_REGISTRY.get(action_name)
         if func:
             return func(None)
         return False, "Unknown confirmed action."
-    elif any(w in cleaned for w in cancel_words):
-        logger.info("User cancelled pending action: %s", _PENDING_CONFIRMATION)
-        _PENDING_CONFIRMATION = None
-        return True, "Action cancelled. Standing by."
     else:
         # Reset if unrelated command
         _PENDING_CONFIRMATION = None

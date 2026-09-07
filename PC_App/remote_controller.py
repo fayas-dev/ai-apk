@@ -215,11 +215,15 @@ class RemoteController:
             }
 
         elif cmd in ("shutdown_pc", "restart_pc"):
-            # Destructive actions must use the shared action registry so the
-            # confirmation safeguard is never bypassed by remote commands.
-            from actions import execute_action
-            success, msg = execute_action(cmd)
-            return {"status": "confirmation_required" if success else "error", "message": msg}
+            # Mobile already shows its own confirmation dialog before sending
+            # this command, so execute directly here instead of routing
+            # through the voice/text confirmation gate in actions.py (which
+            # requires a follow-up spoken "yes" on the PC itself — a channel
+            # the mobile remote screen has no way to reach).
+            from actions import shutdown_pc, restart_pc
+            func = shutdown_pc if cmd == "shutdown_pc" else restart_pc
+            success, msg = func()
+            return {"status": "ok" if success else "error", "message": msg}
 
         elif cmd == "lock_pc":
             success, msg = cls.lock_pc()

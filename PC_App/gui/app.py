@@ -4,7 +4,9 @@ Constructed with CustomTkinter. Multi-page navigation, futuristic cyberpunk styl
 continuous voice listener integration, offline voice synthesis, and system tray support.
 """
 
+import logging
 import threading
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -41,41 +43,110 @@ from speech_listener import SpeechListener
 
 import queue
 
+logger = logging.getLogger("JarvisTTS")
+
 # Dedicated Thread-Safe TTS Worker System
 _tts_queue = queue.Queue()
 _tts_speed = 185
 _tts_engine_ref = None
 
-def _tts_worker_loop():
-    global _tts_engine_ref
+
+class _Sapi5DirectEngine:
+    """
+    Minimal pyttsx3-compatible wrapper around SAPI.SpVoice via win32com.
+    Used as a fallback ONLY if pyttsx3.init() fails — this is a very common
+    PyInstaller + pyttsx3 issue on Windows (its SAPI5 driver relies on
+    win32com COM registration/gen_py caching that can break once frozen
+    into a onefile .exe). Talking to SAPI.SpVoice directly with dynamic
+    COM dispatch sidesteps that problem.
+    """
+
+    def __init__(self):
+        import win32com.client
+        self._voice = win32com.client.Dispatch("SAPI.SpVoice")
+        self._pending_text = ""
+
+    def setProperty(self, name, value):
+        try:
+            if name == "rate":
+                # pyttsx3 uses words-per-minute (~130-230); SAPI uses -10..10
+                wpm = float(value)
+                self._voice.Rate = max(-10, min(10, int(round((wpm - 180) / 10))))
+        except Exception:
+            pass
+
+    def getProperty(self, name):
+        if name == "voices":
+            return []
+        return None
+
+    def say(self, text):
+        self._pending_text = text
+
+    def runAndWait(self):
+        if self._pending_text:
+            self._voice.Speak(self._pending_text)
+            self._pending_text = ""
+
+
+def _init_tts_engine():
+    """Tries pyttsx3 first (cross-platform), then falls back to raw SAPI
+    on Windows if pyttsx3 fails to initialize or produces a broken engine."""
     try:
         import pyttsx3
         engine = pyttsx3.init()
-        _tts_engine_ref = engine
-        engine.setProperty("rate", _tts_speed)
-        voices = engine.getProperty("voices")
-        if voices:
-            for v in voices:
-                if "david" in v.name.lower() or "male" in v.name.lower():
-                    engine.setProperty("voice", v.id)
-                    break
+        engine.getProperty("rate")  # sanity check the engine actually responds
+        logger.info("TTS engine ready via pyttsx3.")
+        return engine
+    except Exception as e:
+        logger.error("pyttsx3.init() failed: %s", e, exc_info=True)
 
-        while True:
-            item = _tts_queue.get()
-            if item is None:
-                break
-            text, done_event = item
-            try:
+    if sys.platform == "win32":
+        try:
+            engine = _Sapi5DirectEngine()
+            logger.info("TTS engine ready via direct SAPI (win32com fallback).")
+            return engine
+        except Exception as e2:
+            logger.error("Direct SAPI fallback also failed: %s", e2, exc_info=True)
+
+    logger.error("No working TTS engine available. Voice output will be disabled.")
+    return None
+
+
+def _tts_worker_loop():
+    global _tts_engine_ref
+    engine = _init_tts_engine()
+    _tts_engine_ref = engine
+
+    if engine:
+        try:
+            engine.setProperty("rate", _tts_speed)
+            voices = engine.getProperty("voices")
+            if voices:
+                for v in voices:
+                    if "david" in v.name.lower() or "male" in v.name.lower():
+                        engine.setProperty("voice", v.id)
+                        break
+        except Exception as e:
+            logger.warning("Could not configure TTS voice/rate: %s", e)
+
+    while True:
+        item = _tts_queue.get()
+        if item is None:
+            break
+        text, done_event = item
+        try:
+            if engine:
                 engine.say(text)
                 engine.runAndWait()
-            except Exception as ex:
-                pass
-            finally:
-                if done_event:
-                    done_event.set()
-                _tts_queue.task_done()
-    except Exception as e:
-        pass
+            else:
+                logger.warning("TTS engine unavailable, dropping speech: %.60s", text)
+        except Exception as ex:
+            logger.error("TTS playback error: %s", ex, exc_info=True)
+        finally:
+            if done_event:
+                done_event.set()
+            _tts_queue.task_done()
 
 # Start dedicated background TTS loop thread
 _tts_worker_thread = threading.Thread(target=_tts_worker_loop, daemon=True)
@@ -328,11 +399,11 @@ class JarvisApp(ctk.CTk):
                 self.content_container,
                 logo_path=LOGO_PNG,
                 on_talk_clicked=self._on_talk_button_clicked,
-                on_quick_action=self.process_user_command,
+                on_quick_action=lambda text: self.process_user_command(text, via_voice=False),
             ),
             "chat": ChatPage(
                 self.content_container,
-                on_send_message=self.process_user_command,
+                on_send_message=lambda text: self.process_user_command(text, via_voice=False),
                 on_mic_clicked=self._on_talk_button_clicked,
             ),
             "actions": ActionsPage(
@@ -441,11 +512,16 @@ class JarvisApp(ctk.CTk):
     def _on_speech_status(self, status: str):
         pass
 
-    def process_user_command(self, command_text: str):
+    def process_user_command(self, command_text: str, via_voice: Optional[bool] = None):
         """Dispatches command to local intent engine or VPS AI and executes safe actions."""
-        # If user initiates via text/button, reset voice state to prevent follow-up loops
-        if not self._voice_initiated:
+        # If the caller explicitly tells us this came from typed text or a
+        # button/chip click (via_voice=False), reset voice state so we don't
+        # keep a "Hey Jarvis" follow-up microphone window open afterward.
+        # When via_voice is None (the wake-word / mic-driven code paths),
+        # leave whatever voice state is already set untouched.
+        if via_voice is False:
             self._voice_initiated = False
+            self._active_conversation = False
 
         # Update Dashboard & Chat UI
         self.pages["dashboard"].update_transcript(command_text)

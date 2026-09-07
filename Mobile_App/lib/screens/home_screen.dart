@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/jarvis_response.dart';
+import '../services/contacts_service.dart';
 import '../services/mobile_actions.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
@@ -360,7 +361,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     // 1. Instant Local Developer / Creator Identity
     final devRegex = RegExp(
-        r'(developer|creator|who made you|who created you|who is your developer|who is youre developer|how is your developer|how is youre developer|who is your creator|who is your boss|who is your owner|owner|who are you|fayas|muhammad fayas|നിന്റെ ഡെവലപ്പർ|ഉണ്ടാക്കിയത്|ആരാണ്)',
+        r'^(who made you|who created you|who built you|who designed you|who programmed you|who is your developer|who is youre developer|how is your developer|how is youre developer|who is your creator|who is youre creator|who is your boss|who is your owner|who are you|what is your name|who is fayas|muhammad fayas)\b|നിന്റെ ഡെവലപ്പർ|ഉണ്ടാക്കിയതാരാണ്|ബോസ് ആരാണ്',
         caseSensitive: false);
     if (devRegex.hasMatch(clean)) {
       final isMalayalam = RegExp(r'[\u0D00-\u0D7F]').hasMatch(query);
@@ -371,7 +372,26 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
-    // 2. PC Actions from Mobile ("open chrome in my pc", "pcyil chrome", "open whatsapp in my pc", etc.)
+    // 2. Call / dial a contact ("call mom", "phone rajan", "dial 9876543210")
+    final callMatch = RegExp(r'^(?:call|phone|dial)\s+(.+)$', caseSensitive: false).firstMatch(clean);
+    if (callMatch != null) {
+      final who = callMatch.group(1)?.trim() ?? '';
+      if (who.isNotEmpty) {
+        final number = await JarvisContactsService.resolveNumber(who);
+        if (number != null) {
+          await MobileActionsService.makePhoneCall(number);
+          await _handleLocalSuccess('Calling $who, sir.', action: 'make_phone_call');
+        } else {
+          await _handleLocalSuccess(
+            'I could not find a contact named "$who", sir. Please say the phone number instead, or check that contacts permission is granted in app settings.',
+            action: 'speak',
+          );
+        }
+        return;
+      }
+    }
+
+    // 2.1 PC Actions from Mobile ("open chrome in my pc", "pcyil chrome", "open whatsapp in my pc", etc.)
     if (clean.contains('in my pc') ||
         clean.contains('on my pc') ||
         clean.contains('on pc') ||
@@ -583,11 +603,10 @@ class _HomeScreenState extends State<HomeScreen>
         if (response.action == 'open_whatsapp') {
           MobileActionsService.openWhatsApp();
         } else if (response.action == 'send_whatsapp_message') {
-          MobileActionsService.openWhatsApp(
-              phone: response.target, message: cleanedSpeech);
+          _resolveAndSendWhatsApp(response.target, cleanedSpeech);
         } else if (response.action == 'make_phone_call' &&
             response.target != null) {
-          MobileActionsService.makePhoneCall(response.target!);
+          _resolveAndCall(response.target!);
         } else if (response.action == 'open_chrome') {
           MobileActionsService.openChrome();
         } else if (response.action == 'view_pc_screen' ||
@@ -618,14 +637,44 @@ class _HomeScreenState extends State<HomeScreen>
           }
         }
       } else {
-        // Courteous fallback so user always gets an acknowledgment
-        final fallback = "I've noted that, sir. Standing by for instructions.";
+        // Speak the actual failure reason so problems are visible instead of
+        // being masked as if the command succeeded.
+        final errorMsg = _sanitizeSpeech(
+          (response.error?.isNotEmpty == true) ? response.error! : response.speech,
+        );
+        final fallback = errorMsg.isNotEmpty
+            ? errorMsg
+            : "Something went wrong processing that, sir.";
+        setState(() {
+          _actionBadge = null;
+        });
         await _handleLocalSuccess(fallback, action: 'speak');
       }
     } catch (e) {
-      final fallback = "Local neural systems active. Ready for your next command, sir.";
+      final fallback = "Connection issue reaching Jarvis VPS, sir: $e";
       await _handleLocalSuccess(fallback, action: 'speak');
     }
+  }
+
+  Future<void> _resolveAndCall(String targetName) async {
+    final number = await JarvisContactsService.resolveNumber(targetName);
+    if (number != null) {
+      await MobileActionsService.makePhoneCall(number);
+    } else if (mounted) {
+      setState(() {
+        _assistantReply =
+            'I could not find a contact named "$targetName", sir. Please say the phone number instead.';
+      });
+      await _ttsService.speak(_assistantReply);
+    }
+  }
+
+  Future<void> _resolveAndSendWhatsApp(String? targetName, String message) async {
+    String? phone;
+    if (targetName != null && targetName.trim().isNotEmpty) {
+      phone = await JarvisContactsService.resolveNumber(targetName);
+    }
+    await MobileActionsService.openWhatsApp(phone: phone, message: message);
   }
 
   Color _getStatusColor() {

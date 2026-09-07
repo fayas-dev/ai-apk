@@ -15,6 +15,10 @@ class JarvisTtsService {
 
   Future<void> initialize() async {
     try {
+      // Without this, speak() resolves as soon as playback STARTS (not
+      // finishes) on Android, so the app would re-open the microphone while
+      // Jarvis is still talking and pick up its own voice as a new command.
+      await _flutterTts.awaitSpeakCompletion(true);
       await _flutterTts.setLanguage('en-US');
       _currentLang = 'en-US';
       await _flutterTts.setSpeechRate(_rate);

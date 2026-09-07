@@ -6,6 +6,7 @@ numpy
 websockets
 pyinstaller
 pyttsx3
+pywin32; sys_platform == "win32"
 pystray
 Pillow
 qrcode

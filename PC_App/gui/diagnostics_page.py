@@ -3,6 +3,8 @@ Jarvis System Diagnostics Page
 Displays connection metrics, audio hardware status, and live telemetry.
 """
 
+import os
+from pathlib import Path
 from typing import Callable
 
 import customtkinter as ctk
@@ -127,3 +129,19 @@ class DiagnosticsPage(ctk.CTkFrame):
             ctk.CTkLabel(row, text=val, font=FONT_BODY_BOLD, text_color=NEON_GREEN).pack(side="left")
 
         ctk.CTkLabel(sec_card, text="", height=6).pack()
+
+        # Card 4: Log File Location — where to look when something misbehaves
+        log_card = ctk.CTkFrame(content, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER_COLOR)
+        log_card.pack(fill="x", pady=6)
+
+        ctk.CTkLabel(log_card, text="TROUBLESHOOTING / LOG FILE", font=FONT_SUBHEADING, text_color=CYAN_ACCENT).pack(anchor="w", padx=16, pady=(12, 6))
+
+        log_path = Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "Jarvis" / "jarvis.log"
+        ctk.CTkLabel(
+            log_card,
+            text=f"If voice, VPS, or an action isn't working, check this file for the exact error:\n{log_path}",
+            font=FONT_SMALL,
+            text_color=TEXT_SECONDARY,
+            justify="left",
+            wraplength=620,
+        ).pack(anchor="w", padx=16, pady=(0, 14))
