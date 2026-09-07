@@ -74,6 +74,8 @@ def build_executable():
         "--hidden-import=numpy",
         "--hidden-import=speech_recognition",
         "--hidden-import=pyautogui",
+        "--hidden-import=qrcode",
+        "--collect-all=qrcode",
         "--hidden-import=PIL",
         "--hidden-import=PIL._tkinter_finder",
     ]
