@@ -1,0 +1,6 @@
+{
+  "name": "JARVIS Neural AI",
+  "description": "Autonomous Neural AI Assistant & Device Remote Control System with Arc Reactor interface and PC control.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

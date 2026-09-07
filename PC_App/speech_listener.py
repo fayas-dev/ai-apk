@@ -62,6 +62,16 @@ class SpeechListener:
         """Immediately aborts any active audio recording."""
         self._cancel_active_capture = True
 
+    def pause(self):
+        """Thread-safe pause: stops active audio recording and prevents new captures."""
+        self._paused = True
+        self._cancel_active_capture = True
+
+    def resume(self):
+        """Thread-safe resume: allows the listen loop to resume."""
+        self._cancel_active_capture = False
+        self._paused = False
+
     def initialize_microphone(self) -> bool:
         """Initializes the default microphone and adjusts for ambient noise."""
         self._notify_status("Initializing microphone...")
@@ -191,6 +201,7 @@ class SpeechListener:
                             except Exception as ex:
                                 logger.warning("Wake acknowledgment error: %s", ex)
 
+                        time.sleep(0.35)
                         self._notify_status("Listening for command...")
                         logger.info("Listening for follow-up command...")
                         command = self._capture_followup_command(timeout=8.0)

@@ -1,4 +1,4 @@
-name: Build Jarvis Android APK
+name: Build JARVIS releases
 
 on:
   push:
@@ -8,12 +8,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build APK
+  android:
+    name: Build Android APK
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -45,33 +42,62 @@ jobs:
         path: Mobile_App/build/app/outputs/flutter-apk/app-release.apk
         retention-days: 30
     
-    - name: Create Release
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v1
+
+  windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        files: Mobile_App/build/app/outputs/flutter-apk/app-release.apk
+        python-version: '3.11'
+
+    - name: Install desktop dependencies
+      working-directory: PC_App
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt
+
+    - name: Build desktop app
+      working-directory: PC_App
+      run: python build_exe.py
+
+    - name: Upload EXE artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: jarvis-windows-exe
+        path: PC_App/dist/Jarvis.exe
+        retention-days: 30
+
+  release:
+    name: Publish release files
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download Android APK
+      uses: actions/download-artifact@v4
+      with:
+        name: jarvis-release-apk
+        path: release
+
+    - name: Download Windows EXE
+      uses: actions/download-artifact@v4
+      with:
+        name: jarvis-windows-exe
+        path: release
+
+    - name: Publish GitHub release
+      uses: softprops/action-gh-release@v2
+      with:
         tag_name: v${{ github.run_number }}
-        name: Jarvis AI Mobile v${{ github.run_number }}
-        body: |
-          🤖 **JARVIS AI Assistant - Mobile App Release**
-          
-          **Owner**: Muhammad Fayas (21/03/2010, Kaipamangalam, Thrissur, Kerala)
-          
-          **Features**:
-          - ✅ Malayalam & English voice support
-          - ✅ PC Remote Control (mouse, keyboard, screen view)
-          - ✅ Live PC screen streaming
-          - ✅ Virtual trackpad & keyboard
-          - ✅ Quick PC actions (shutdown, restart, lock)
-          - ✅ Mobile actions (WhatsApp, Chrome)
-          - ✅ Male voice synthesis tuning
-          
-          **Installation**:
-          1. Download `app-release.apk`
-          2. Enable "Install from Unknown Sources" in Android settings
-          3. Install the APK
-          4. Connect to VPS: `ws://45.131.64.32:2004/ws/jarvis`
-          
-          Built automatically via GitHub Actions ⚡
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: JARVIS v${{ github.run_number }}
+        generate_release_notes: true
+        files: |
+          release/app-release.apk
+          release/Jarvis.exe

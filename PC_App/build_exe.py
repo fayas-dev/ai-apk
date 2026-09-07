@@ -77,9 +77,15 @@ def build_executable():
         "--hidden-import=qrcode",
         "--collect-all=qrcode",
         "--hidden-import=PIL",
-        "--hidden-import=PIL._tkinter_finder",
         "--hidden-import=intent_engine",
         "--hidden-import=local_server",
+        "--hidden-import=actions",
+        "--hidden-import=remote_controller",
+        "--hidden-import=jarvis_client",
+        "--hidden-import=config",
+        "--hidden-import=qr_generator",
+        "--hidden-import=speech_listener",
+        "--hidden-import=dotenv",
     ]
 
     if LOGO_ICO.exists():

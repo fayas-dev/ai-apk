@@ -25,6 +25,10 @@ wheels/
 venv/
 ENV/
 env/
+.venv/
+
+# JavaScript dependencies
+node_modules/
 
 # IDE
 .vscode/

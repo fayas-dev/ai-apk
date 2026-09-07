@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import webbrowser
+from urllib.parse import quote_plus
 from typing import Any, Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger("JarvisActions")
@@ -37,11 +38,12 @@ SAFE_APP_MAP = {
 
 
 def open_chrome(target: Optional[str] = None, speak_callback: Optional[Callable[[str], None]] = None) -> Tuple[bool, str]:
-    """Reliably opens Google Chrome."""
-    logger.info("Executing action: open_chrome")
+    """Reliably opens Google Chrome, optionally navigating to a target URL."""
+    logger.info("Executing action: open_chrome (target: %s)", target)
     speech = "Opening Google Chrome, sir."
     if speak_callback:
         speak_callback(speech)
+    args = [target] if target and (target.startswith("http://") or target.startswith("https://")) else []
     try:
         # Common Chrome paths on Windows
         chrome_paths = [
@@ -51,16 +53,17 @@ def open_chrome(target: Optional[str] = None, speak_callback: Optional[Callable[
         ]
         for path in chrome_paths:
             if os.path.exists(path):
-                subprocess.Popen([path])
+                subprocess.Popen([path] + args)
                 return True, "Google Chrome opened successfully."
 
         # Fallback: Windows start protocol
-        subprocess.Popen(["cmd.exe", "/c", "start", "chrome"], shell=False)
+        cmd = ["cmd.exe", "/c", "start", "chrome"] + args
+        subprocess.Popen(cmd, shell=False)
         return True, "Google Chrome opened via default system launcher."
     except Exception as e:
         logger.error("Failed to open Chrome: %s", e)
         # Final fallback: open browser via standard library
-        webbrowser.open("https://www.google.com")
+        webbrowser.open(target if args else "https://www.google.com")
         return True, "Opened web browser."
 
 
@@ -147,7 +150,7 @@ def search_and_open(target: Optional[str] = None) -> Tuple[bool, str]:
         url = site_map[query_lower]
     else:
         # Google search
-        url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+        url = f"https://www.google.com/search?q={quote_plus(query)}"
     
     try:
         # Try to open in Chrome specifically
@@ -256,7 +259,7 @@ def search_web(target: Optional[str] = None, speak_callback: Optional[Callable[[
         return False, "No search query specified."
 
     query = target.strip()
-    search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+    search_url = f"https://www.google.com/search?q={quote_plus(query)}"
     speech = f"Searching for {query} on Google, sir."
     if speak_callback:
         speak_callback(speech)

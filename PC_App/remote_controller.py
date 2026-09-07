@@ -214,13 +214,12 @@ class RemoteController:
                 "screen": screen_b64,
             }
 
-        elif cmd == "shutdown_pc":
-            success, msg = cls.shutdown_pc()
-            return {"status": "ok" if success else "error", "message": msg}
-
-        elif cmd == "restart_pc":
-            success, msg = cls.restart_pc()
-            return {"status": "ok" if success else "error", "message": msg}
+        elif cmd in ("shutdown_pc", "restart_pc"):
+            # Destructive actions must use the shared action registry so the
+            # confirmation safeguard is never bypassed by remote commands.
+            from actions import execute_action
+            success, msg = execute_action(cmd)
+            return {"status": "confirmation_required" if success else "error", "message": msg}
 
         elif cmd == "lock_pc":
             success, msg = cls.lock_pc()
@@ -236,7 +235,13 @@ class RemoteController:
             success, msg = open_whatsapp()
             return {"status": "ok" if success else "error", "message": msg}
 
-        elif cmd in ("open_application", "open_website"):
+        elif cmd in (
+            "open_application",
+            "open_website",
+            "search_web",
+            "open_url_in_chrome",
+            "search_and_open_app",
+        ):
             from actions import execute_action
             success, msg = execute_action(cmd, command_data.get("target"))
             return {"status": "ok" if success else "error", "message": msg}

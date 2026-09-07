@@ -10,3 +10,5 @@ pystray
 Pillow
 qrcode
 pyautogui
+python-dotenv
+requests

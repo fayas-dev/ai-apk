@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Rajdhani', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #070B12;
+    color: #FFFFFF;
+  }
+
+  h1, h2, h3, .font-orbitron {
+    font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  }
+}
+
+@keyframes arcPulseSlow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 0.85;
+  }
+}
+
+@keyframes arcRotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes arcRotateReverse {
+  0% {
+    transform: rotate(360deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.animate-arc-pulse {
+  animation: arcPulseSlow 3s ease-in-out infinite;
+}
+
+.animate-arc-rotate {
+  animation: arcRotate 24s linear infinite;
+}
+
+.animate-arc-rotate-rev {
+  animation: arcRotateReverse 18s linear infinite;
+}
+
+.glow-cyan {
+  box-shadow: 0 0 25px rgba(0, 229, 255, 0.4), inset 0 0 15px rgba(0, 229, 255, 0.2);
+}
+
+.glow-green {
+  box-shadow: 0 0 25px rgba(0, 255, 136, 0.45), inset 0 0 15px rgba(0, 255, 136, 0.2);
+}
+
+.glow-purple {
+  box-shadow: 0 0 25px rgba(189, 0, 255, 0.45), inset 0 0 15px rgba(189, 0, 255, 0.2);
+}
+
+.glow-red {
+  box-shadow: 0 0 25px rgba(255, 51, 102, 0.45), inset 0 0 15px rgba(255, 51, 102, 0.2);
+}

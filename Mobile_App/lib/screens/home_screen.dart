@@ -292,7 +292,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     // 1. Instant Local Developer / Creator Identity
     final devRegex = RegExp(
-        r'(developer|creator|who made you|who created you|who is your developer|who is your creator|who is your boss|who is your owner|owner|who are you|fayas|നിന്റെ ഡെവലപ്പർ|ഉണ്ടാക്കിയത്|ആരാണ്)',
+        r'(developer|creator|who made you|who created you|who is your developer|who is youre developer|how is your developer|how is youre developer|who is your creator|who is your boss|who is your owner|owner|who are you|fayas|muhammad fayas|നിന്റെ ഡെവലപ്പർ|ഉണ്ടാക്കിയത്|ആരാണ്)',
         caseSensitive: false);
     if (devRegex.hasMatch(clean)) {
       final isMalayalam = RegExp(r'[\u0D00-\u0D7F]').hasMatch(query);
@@ -318,7 +318,8 @@ class _HomeScreenState extends State<HomeScreen>
         return;
       }
 
-      if (clean.contains('chrome') || clean.contains('ക്രോം')) {
+      // Chrome on PC (supports both "chrome" and "crome")
+      if (clean.contains('chrome') || clean.contains('crome') || clean.contains('ക്രോം')) {
         _wsService.openChromeOnPc();
         await _handleLocalSuccess('Opening Google Chrome on your PC, sir.', action: 'open_chrome');
         return;
@@ -367,11 +368,21 @@ class _HomeScreenState extends State<HomeScreen>
         }
       }
 
-      // Open any website/app on PC ("open instagram in my pc", "open kiro in my pc")
+      // Open any website/app on PC ("open instagram in my pc", "open kiro in my pc", "open crome in my pc")
       final pcOpenMatch = RegExp(r'open\s+(.+?)(?:\s+(?:in|on)\s+(?:my\s+)?pc)', caseSensitive: false).firstMatch(clean);
       if (pcOpenMatch != null) {
         final appName = pcOpenMatch.group(1)?.trim() ?? '';
         if (appName.isNotEmpty) {
+          if (appName == 'crome' || appName == 'chrome') {
+            _wsService.openChromeOnPc();
+            await _handleLocalSuccess('Opening Google Chrome on your PC, sir.', action: 'open_chrome');
+            return;
+          }
+          if (appName == 'kiro') {
+            _wsService.searchWebOnPc('kiro');
+            await _handleLocalSuccess('Searching for Kiro on Google and opening it on your PC, sir.', action: 'search_web');
+            return;
+          }
           // Check for well-known websites
           const websiteMap = {
             'youtube': 'https://www.youtube.com',
@@ -403,21 +414,42 @@ class _HomeScreenState extends State<HomeScreen>
       }
     }
 
-    // 2.5 Search commands (no "in my pc" - searches on PC by default)
+    // 2.5 Search commands (no "in my pc" - searches on PC by default if connected)
     final searchMatch = RegExp(r'^(?:search|search for|google|look up)\s+(.+)$', caseSensitive: false).firstMatch(clean);
     if (searchMatch != null) {
       final searchQuery = searchMatch.group(1)?.trim() ?? '';
       if (searchQuery.isNotEmpty) {
-        _wsService.searchWebOnPc(searchQuery);
-        await _handleLocalSuccess('Searching for $searchQuery on Google, sir.', action: 'search_web');
+        if (_wsService.currentStatus == ConnectionStateStatus.connected) {
+          _wsService.searchWebOnPc(searchQuery);
+          await _handleLocalSuccess('Searching for $searchQuery on Google on your PC, sir.', action: 'search_web');
+        } else {
+          MobileActionsService.openUrl('https://www.google.com/search?q=$searchQuery');
+          await _handleLocalSuccess('Searching for $searchQuery on Google, sir.', action: 'search_web');
+        }
         return;
       }
     }
 
-    // 3. Instant Local Phone Actions
+    // 3. Instant Local Phone / PC Actions
     if (clean.contains('open youtube') || clean.contains('യൂട്യൂബ്')) {
-      MobileActionsService.openUrl('https://www.youtube.com');
-      await _handleLocalSuccess('Opening YouTube, sir.', action: 'open_website');
+      if (_wsService.currentStatus == ConnectionStateStatus.connected) {
+        _wsService.openYoutubeOnPc();
+        await _handleLocalSuccess('Opening YouTube on your PC in Chrome, sir.', action: 'open_url_in_chrome');
+      } else {
+        MobileActionsService.openUrl('https://www.youtube.com');
+        await _handleLocalSuccess('Opening YouTube, sir.', action: 'open_website');
+      }
+      return;
+    }
+
+    if (clean.contains('open kiro') || clean.contains('search kiro')) {
+      if (_wsService.currentStatus == ConnectionStateStatus.connected) {
+        _wsService.searchWebOnPc('kiro');
+        await _handleLocalSuccess('Searching for Kiro on Google and opening on your PC, sir.', action: 'search_web');
+      } else {
+        MobileActionsService.openUrl('https://www.google.com/search?q=kiro');
+        await _handleLocalSuccess('Searching for Kiro on Google, sir.', action: 'search_web');
+      }
       return;
     }
 

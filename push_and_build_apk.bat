@@ -7,7 +7,7 @@ echo ======================================================================
 echo.
 echo Target Repository: https://github.com/fayas-dev/ai-apk.git
 echo.
-cd /d "c:\Users\fayas_1ewqckb\Downloads\ai\Jarvis"
+cd /d "%~dp0"
 
 echo [1/2] Connecting to GitHub...
 echo If a browser window pops up asking to Sign In / Authorize GitHub, 

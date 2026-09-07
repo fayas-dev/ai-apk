@@ -30,8 +30,8 @@ class _RemoteTrackpadScreenState extends State<RemoteTrackpadScreen> {
       }
     });
 
-    // Request initial screen capture
-    widget.wsService.requestPcScreen();
+    // Automatically enable live screen stream with visible pointer (600ms refresh)
+    _toggleAutoRefresh(true);
   }
 
   @override
@@ -48,8 +48,11 @@ class _RemoteTrackpadScreenState extends State<RemoteTrackpadScreen> {
     });
     _autoRefreshTimer?.cancel();
     if (enable) {
-      _autoRefreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-        widget.wsService.requestPcScreen();
+      widget.wsService.requestPcScreen();
+      _autoRefreshTimer = Timer.periodic(const Duration(milliseconds: 600), (_) {
+        if (mounted) {
+          widget.wsService.requestPcScreen();
+        }
       });
     }
   }

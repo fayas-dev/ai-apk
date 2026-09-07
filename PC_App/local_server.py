@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, Optional, Set
 import websockets
 
 from actions import execute_action
-from intent_engine import evaluate_local_intent, sanitize_speech_reply
+from intent_engine import evaluate_local_intent, sanitize_speech_reply, query_openrouter_direct
 from qr_generator import get_local_ip
 from remote_controller import RemoteController
 
@@ -222,16 +222,35 @@ class LocalDirectServer:
                     })
                 )
             else:
-                await ws.send(
-                    json.dumps({
-                        "type": "response",
-                        "request_id": request_id,
-                        "success": True,
-                        "action": "speak",
-                        "target": None,
-                        "speech": "Command received and processed, sir.",
-                    })
-                )
+                # Direct OpenRouter fallback
+                direct_ai = query_openrouter_direct(text)
+                if direct_ai and direct_ai.get("success"):
+                    action_name = direct_ai.get("action", "speak")
+                    target = direct_ai.get("target")
+                    if action_name != "speak":
+                        execute_action(action_name, target)
+
+                    await ws.send(
+                        json.dumps({
+                            "type": "response",
+                            "request_id": request_id,
+                            "success": True,
+                            "action": action_name,
+                            "target": target,
+                            "speech": direct_ai["speech"],
+                        })
+                    )
+                else:
+                    await ws.send(
+                        json.dumps({
+                            "type": "response",
+                            "request_id": request_id,
+                            "success": True,
+                            "action": "speak",
+                            "target": None,
+                            "speech": "Command received and processed, sir.",
+                        })
+                    )
             return
 
     def stop(self):

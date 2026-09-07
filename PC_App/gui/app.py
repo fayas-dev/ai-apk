@@ -15,7 +15,7 @@ from pystray import MenuItem as item
 
 from actions import check_and_handle_confirmation, execute_action
 from config import JARVIS_SERVER_URL, JARVIS_TTS_ENABLED, LOGO_ICO, LOGO_PNG
-from intent_engine import evaluate_local_intent, sanitize_speech_reply
+from intent_engine import evaluate_local_intent, sanitize_speech_reply, query_openrouter_direct
 from local_server import LocalDirectServer
 from qr_generator import get_local_ip
 from gui.actions_page import ActionsPage
@@ -371,9 +371,13 @@ class JarvisApp(ctk.CTk):
     def _on_wake_detected(self):
         if not self.listening_enabled:  # Skip if listening is disabled
             return
+        self.listener.pause()
         self.after(0, lambda: self.pages["dashboard"].set_state("LISTENING", "Wake phrase detected! Acknowledging..."))
         # Speak synchronously so microphone does not capture "Yes, sir?" from the PC speakers
         speak_voice_sync("Yes, sir?", self.tts_enabled)
+        import time
+        time.sleep(0.35)
+        self.listener.resume()
         self.after(0, lambda: self.pages["dashboard"].set_state("LISTENING", "Listening for your command..."))
 
     def _on_command_failed(self):
@@ -449,8 +453,14 @@ class JarvisApp(ctk.CTk):
                 self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
                 return
 
-            # Step 3: Query VPS Server
-            response = self.client.send_command(command_text)
+            # Step 3: Query VPS Server if connected
+            response = None
+            if self.client.is_connected:
+                try:
+                    response = self.client.send_command(command_text, timeout=6.0)
+                except Exception:
+                    response = None
+
             if response and response.get("success", False):
                 action_name = response.get("action", "speak")
                 target = response.get("target")
@@ -462,10 +472,24 @@ class JarvisApp(ctk.CTk):
                     success, action_log = execute_action(action_name, target)
 
                 self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
-            else:
-                # Friendly fallback so the user always receives a courteous, smart reply
-                fallback_speech = f"Command recognized, sir. Executing '{command_text}' on local system."
-                self.after(0, lambda: self._finalize_action("speak", fallback_speech, "Processed locally"))
+                return
+
+            # Step 4: Instant Direct OpenRouter AI Fallback
+            direct_ai = query_openrouter_direct(command_text)
+            if direct_ai and direct_ai.get("success"):
+                action_name = direct_ai.get("action", "speak")
+                target = direct_ai.get("target")
+                speech_reply = direct_ai.get("speech", "")
+                action_log = None
+                if action_name != "speak":
+                    success, action_log = execute_action(action_name, target)
+
+                self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
+                return
+
+            # Step 5: Safe local fallback
+            fallback_speech = f"Command recognized, sir. Executing '{command_text}' on local system."
+            self.after(0, lambda: self._finalize_action("speak", fallback_speech, "Processed locally"))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -481,16 +505,19 @@ class JarvisApp(ctk.CTk):
         if action_name != "speak":
             self.pages["actions"].add_log_entry(action_name, action_log or speech_text)
 
-        # Speak Vocal Response
-        if self.tts_enabled:
-            speak_voice(speech_text, True)
+        # PAUSE microphone listener completely while speaking to prevent collision/feedback!
+        self.listener.pause()
 
-        # Estimate speech duration so microphone does not pick up Jarvis's own vocal reply
-        word_count = len(speech_text.split()) if speech_text else 3
-        tts_delay_ms = max(2000, int((word_count / 2.7) * 1000) + 600)
+        def _speak_and_resume():
+            if self.tts_enabled:
+                speak_voice_sync(speech_text, True, timeout=20.0)
+            # Brief pause for speaker echo dissipation
+            import time
+            time.sleep(0.35)
+            self.listener.resume()
+            self.after(0, lambda: self._start_conversation_window(timeout=25.0))
 
-        # Start 30-second conversational follow-up window (no need to repeat "Hey Jarvis")
-        self.after(tts_delay_ms, lambda: self._start_conversation_window(timeout=30.0))
+        threading.Thread(target=_speak_and_resume, daemon=True).start()
 
     def _start_conversation_window(self, timeout: float = 30.0):
         """

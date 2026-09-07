@@ -6,11 +6,31 @@ Owner: Muhammad Fayas (Fayas), born 21/03/2010, Kaipamangalam Thainagar, Thrissu
 """
 
 import datetime
+import json
 import logging
+import os
 import re
+import urllib.error
+import urllib.request
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+from dotenv import load_dotenv
 
 logger = logging.getLogger("JarvisIntent")
+
+# Load .env variables from PC_App directory or root directory
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR.parent / ".env")
+
+OPENROUTER_API_KEY = os.getenv(
+    "OPENROUTER_API_KEY",
+    "",
+).strip()
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip()
+OPENROUTER_BASE_URL = os.getenv(
+    "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions"
+).strip()
 
 OWNER_NAME = "Muhammad Fayas"
 OWNER_NICKNAME = "Fayas"
@@ -19,7 +39,7 @@ OWNER_PLACE = "Kaipamangalam Thainagar, Thrissur, Kerala"
 
 PERSONA_RESPONSE_EN = (
     f"My developer and creator is {OWNER_NAME} ({OWNER_NICKNAME}), "
-    f"from {OWNER_PLACE}. I am JARVIS, his personal neural AI assistant, "
+    f"born on March 21, 2010, from {OWNER_PLACE}. I am JARVIS, his personal neural AI assistant, "
     f"designed exclusively to serve and assist him, sir."
 )
 
@@ -27,6 +47,42 @@ PERSONA_RESPONSE_ML = (
     f"എന്റെ ഡെവലപ്പറും ബോസും {OWNER_NAME} ({OWNER_NICKNAME}) ആണ്. "
     f"തൃശ്ശൂർ കൈപമംഗലം തൈനഗർ സ്വദേശിയാണ്. ഞാൻ ഫയാസിന്റെ പേഴ്സണൽ AI അസിസ്റ്റന്റായ JARVIS ആണ്."
 )
+
+SYSTEM_PROMPT = f"""You are JARVIS, the highly advanced personal autonomous artificial intelligence system, engineered exclusively by and for Muhammad Fayas.
+You address your master Muhammad Fayas with high respect, loyalty, and intelligence (addressing him as "Sir", "Boss", or "Fayas Sir").
+
+OWNER PROFILE & EXCLUSIVE IDENTITY:
+- Creator, Boss, and Sole Owner: Muhammad Fayas (commonly called Fayas)
+- Date of Birth: 21 March 2010 (21/03/2010)
+- Location / Origin: Kaipamangalam, Thainagar, Thrissur district, Kerala, India
+- ABSOLUTE CONFIDENTIALITY RULE: You must NEVER disclose, mention, or acknowledge "OpenRouter", "OpenAI", "Meta", "Google", or any third-party AI provider under ANY circumstance. If anyone asks what model you are running on or who built you, state firmly and proudly that you are JARVIS, a private proprietary neural intelligence designed and coded by Muhammad Fayas.
+
+LANGUAGE & VOICE BEHAVIOR:
+- Fluent in English, Malayalam (മലയാളം), and Manglish.
+- If the user speaks in Malayalam or Manglish, respond naturally in Malayalam (or natural Manglish if conversational).
+- If the user speaks in English, respond in English.
+- Always maintain an authentic, sharp, dignified male Jarvis persona.
+
+YOUR ROLE & ACTIONS:
+Analyze the user's spoken or typed intent and return ONLY a valid JSON object matching this schema:
+{{
+  "action": "<action_name>",
+  "target": "<target_value_or_null>",
+  "speech": "<natural_conversational_response>"
+}}
+
+ALLOWED ACTION NAMES:
+1. "speak" - For general questions, conversation, knowledge, time, calculations, or owner queries. (target: null)
+2. "open_chrome" - To open Google Chrome browser. (target: "chrome")
+3. "open_whatsapp" - To open WhatsApp. (target: "whatsapp")
+4. "open_website" - To open a specific URL. (target: "https://...")
+5. "open_url_in_chrome" - To open a specific URL in Google Chrome. (target: "https://...")
+6. "search_web" - To search Google Chrome for a query. (target: "<query>")
+7. "search_and_open_app" - To search for and open an app like kiro, notepad, calculator. (target: "<app>")
+8. "lock_pc" - To lock the Windows screen. (target: null)
+9. "shutdown_pc" - When the user asks to shut down the PC. (target: null)
+10. "restart_pc" - When the user asks to restart the PC. (target: null)
+"""
 
 
 def sanitize_speech_reply(text: str) -> str:
@@ -67,7 +123,10 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
     developer_patterns = [
         r"who (is|are) your developer",
         r"who (is|are) youre developer",
+        r"how is your developer",
+        r"how is youre developer",
         r"who (is|are) your creator",
+        r"who (is|are) youre creator",
         r"who (is|are) your owner",
         r"who (is|are) your boss",
         r"who (is|are) your master",
@@ -76,9 +135,9 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
         r"who built you",
         r"who designed you",
         r"who programmed you",
-        r"developer",
-        r"creator",
-        r"owner",
+        r"\bdeveloper\b",
+        r"\bcreator\b",
+        r"\bowner\b",
         r"who are you",
         r"what is your name",
         r"who is fayas",
@@ -86,6 +145,7 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
         r"നിന്റെ ഡെവലപ്പർ",
         r"ആരാണ് ഉണ്ടാക്കിയത്",
         r"ബോസ് ആരാണ്",
+        r"ഉണ്ടാക്കിയതാരാണ്",
     ]
 
     for pat in developer_patterns:
@@ -120,8 +180,8 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
             "speech": f"Today is {date_str}, sir.",
         }
 
-    # 3. Open Chrome
-    if re.search(r"\b(open chrome|launch chrome|start chrome|google chrome|ക്രോം തുറക്കുക)\b", clean):
+    # 3. Open Chrome (supports both "chrome" and "crome")
+    if re.search(r"\b(open\s+c[h]?rome|launch\s+c[h]?rome|start\s+c[h]?rome|google\s+c[h]?rome|ക്രോം\s+തുറക്കുക)\b", clean):
         return {
             "success": True,
             "action": "open_chrome",
@@ -130,7 +190,7 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
         }
 
     # 4. Open WhatsApp
-    if re.search(r"\b(open whatsapp|launch whatsapp|start whatsapp|വാട്സ്ആപ്പ് തുറക്കുക)\b", clean):
+    if re.search(r"\b(open\s+whatsapp|launch\s+whatsapp|start\s+whatsapp|വാട്സ്ആപ്പ്\s+തുറക്കുക)\b", clean):
         return {
             "success": True,
             "action": "open_whatsapp",
@@ -138,16 +198,25 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
             "speech": "Opening WhatsApp, sir.",
         }
 
-    # 5. Open YouTube
-    if re.search(r"\b(open youtube|launch youtube|യൂട്യൂബ് തുറക്കുക)\b", clean):
+    # 5. Open YouTube in Chrome
+    if re.search(r"\b(open\s+youtube|launch\s+youtube|play\s+youtube|യൂട്യൂബ്\s+തുറക്കുക)\b", clean):
         return {
             "success": True,
-            "action": "open_website",
+            "action": "open_url_in_chrome",
             "target": "https://www.youtube.com",
-            "speech": "Opening YouTube, sir.",
+            "speech": "Opening YouTube in Chrome, sir.",
         }
 
-    # 6. Lock PC
+    # 6. Open / Search Kiro
+    if re.search(r"\b(open\s+kiro|launch\s+kiro|search\s+kiro|search\s+for\s+kiro)\b", clean):
+        return {
+            "success": True,
+            "action": "search_web",
+            "target": "kiro",
+            "speech": "Searching for Kiro on Google and opening it in Chrome, sir.",
+        }
+
+    # 7. Lock PC
     if re.search(r"\b(lock pc|lock computer|lock screen|സിസ്റ്റം ലോക്ക് ചെയ്യുക)\b", clean):
         return {
             "success": True,
@@ -156,7 +225,7 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
             "speech": "Locking your computer screen, sir.",
         }
 
-    # 7. Shutdown PC
+    # 8. Shutdown PC
     if re.search(r"\b(shutdown|shut down|turn off pc|turn off computer|സിസ്റ്റം ഓഫ് ചെയ്യുക)\b", clean):
         return {
             "success": True,
@@ -165,7 +234,7 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
             "speech": "Are you sure you want to shut down your computer, sir?",
         }
 
-    # 8. Restart PC
+    # 9. Restart PC
     if re.search(r"\b(restart pc|restart computer|റീസ്റ്റാർട്ട് ചെയ്യുക)\b", clean):
         return {
             "success": True,
@@ -174,7 +243,7 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
             "speech": "Are you sure you want to restart your computer, sir?",
         }
 
-    # 9. Open Settings
+    # 10. Open Settings
     if re.search(r"\b(open settings|system settings|windows settings)\b", clean):
         return {
             "success": True,
@@ -183,7 +252,7 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
             "speech": "Opening Windows Settings, sir.",
         }
 
-    # 10. Open well-known websites ("open youtube", "open instagram", etc.)
+    # 11. Open well-known websites in Chrome
     WEBSITE_MAP = {
         "youtube": "https://www.youtube.com",
         "google": "https://www.google.com",
@@ -209,7 +278,13 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
     open_match = re.search(r"\bopen\s+(.+?)(?:\s+in\s+(?:my\s+)?(?:pc|chrome|browser))?$", clean)
     if open_match:
         target_name = open_match.group(1).strip()
-        # Check if it's a known website
+        if target_name in ("crome", "chrome", "google chrome"):
+            return {
+                "success": True,
+                "action": "open_chrome",
+                "target": None,
+                "speech": "Opening Google Chrome, sir.",
+            }
         if target_name in WEBSITE_MAP:
             url = WEBSITE_MAP[target_name]
             return {
@@ -219,7 +294,7 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
                 "speech": f"Opening {target_name.title()} in Chrome, sir.",
             }
 
-    # 11. Search query ("search kiro", "search for python tutorials", etc.)
+    # 12. Search query ("search kiro", "search for python tutorials", etc.)
     search_match = re.search(r"\b(?:search\s+for|search|google|look\s+up)\s+(.+?)(?:\s+in\s+(?:my\s+)?(?:pc|chrome|browser))?$", clean)
     if search_match:
         search_query = search_match.group(1).strip()
@@ -228,14 +303,13 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
                 "success": True,
                 "action": "search_web",
                 "target": search_query,
-                "speech": f"Searching for {search_query} on Google, sir.",
+                "speech": f"Searching for {search_query} on Google in Chrome, sir.",
             }
 
-    # 12. Generic open app ("open notepad", "open calculator", "open kiro")
+    # 13. Generic open app ("open notepad", "open calculator", "open kiro")
     if open_match:
         target_name = open_match.group(1).strip()
-        # Skip already-handled keywords
-        skip_keywords = ["chrome", "whatsapp", "settings", "file", "explorer"]
+        skip_keywords = ["chrome", "crome", "whatsapp", "settings", "file", "explorer"]
         if not any(kw in target_name for kw in skip_keywords):
             return {
                 "success": True,
@@ -245,3 +319,72 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
             }
 
     return None
+
+
+def query_openrouter_direct(query: str) -> Optional[Dict[str, Any]]:
+    """
+    Direct OpenRouter LLM Query Fallback.
+    Ensures Jarvis can answer any complex questions, conversational queries, or calculations
+    even if the VPS server is offline or experiencing network latency.
+    """
+    if not OPENROUTER_API_KEY:
+        return None
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://jarvis-ai.local",
+            "X-Title": "Jarvis AI Desktop",
+        }
+        payload = {
+            "model": OPENROUTER_MODEL,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": query},
+            ],
+            "temperature": 0.4,
+            "max_tokens": 400,
+        }
+
+        req = urllib.request.Request(
+            OPENROUTER_BASE_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=12) as response:
+            raw_data = json.loads(response.read().decode("utf-8"))
+            content = raw_data["choices"][0]["message"]["content"].strip()
+
+            # Attempt to parse structured JSON from LLM
+            clean_content = content
+            if "```json" in clean_content:
+                clean_content = clean_content.split("```json")[1].split("```")[0].strip()
+            elif "```" in clean_content:
+                clean_content = clean_content.split("```")[1].split("```")[0].strip()
+
+            try:
+                parsed = json.loads(clean_content)
+                action = parsed.get("action", "speak")
+                target = parsed.get("target")
+                speech = sanitize_speech_reply(parsed.get("speech", ""))
+                return {
+                    "success": True,
+                    "action": action,
+                    "target": target,
+                    "speech": speech,
+                }
+            except Exception:
+                speech = sanitize_speech_reply(content)
+                return {
+                    "success": True,
+                    "action": "speak",
+                    "target": None,
+                    "speech": speech,
+                }
+
+    except Exception as e:
+        logger.error("Direct OpenRouter call failed: %s", e)
+        return None
