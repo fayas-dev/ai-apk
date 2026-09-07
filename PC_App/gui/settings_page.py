@@ -1,11 +1,14 @@
 """
 Jarvis Settings & Voice Configuration Page
-Control TTS voice properties, wake-phrase sensitivity, and VPS endpoints.
+Control TTS voice properties, wake-phrase sensitivity, VPS endpoints, and Mobile QR Pairing.
 """
 
+import os
+from pathlib import Path
 from typing import Callable
 
 import customtkinter as ctk
+from PIL import Image
 
 from gui.theme import (
     BORDER_COLOR,
@@ -22,6 +25,7 @@ from gui.theme import (
     TEXT_PRIMARY,
     TEXT_SECONDARY,
 )
+from qr_generator import generate_pairing_qr_code
 
 
 class SettingsPage(ctk.CTkFrame):
@@ -39,6 +43,7 @@ class SettingsPage(ctk.CTkFrame):
         self.current_tts = current_tts
         self.on_test_voice = on_test_voice
         self.on_save_settings = on_save_settings
+        self.qr_image = None
 
         self._setup_ui()
 
@@ -48,14 +53,14 @@ class SettingsPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             header,
-            text="JARVIS SYSTEM & VOICE CONFIGURATION",
+            text="JARVIS SYSTEM & MOBILE PAIRING CONFIGURATION",
             font=FONT_HEADING,
             text_color=CYAN_ACCENT,
         ).pack(anchor="w")
 
         ctk.CTkLabel(
             header,
-            text="Customize voice synthesis, wake-phrase detection, and VPS endpoints.",
+            text="Pair your mobile device, calibrate voice synthesis, and view owner profile.",
             font=FONT_SMALL,
             text_color=TEXT_SECONDARY,
         ).pack(anchor="w")
@@ -63,7 +68,38 @@ class SettingsPage(ctk.CTkFrame):
         content = ctk.CTkScrollableFrame(self, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=30, pady=10)
 
-        # Voice Settings Card
+        # 1. Owner Profile Card
+        owner_card = ctk.CTkFrame(content, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER_COLOR)
+        owner_card.pack(fill="x", pady=8)
+
+        ctk.CTkLabel(owner_card, text="AUTHORIZED MASTER & OWNER", font=FONT_SUBHEADING, text_color=CYAN_ACCENT).pack(anchor="w", padx=16, pady=(14, 4))
+        ctk.CTkLabel(owner_card, text="Owner: Muhammad Fayas  |  DOB: 21/03/2010", font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY).pack(anchor="w", padx=16, pady=2)
+        ctk.CTkLabel(owner_card, text="Origin: Kaipamangalam, Thainagar, Thrissur, Kerala", font=FONT_SMALL, text_color=TEXT_SECONDARY).pack(anchor="w", padx=16, pady=(0, 14))
+
+        # 2. Mobile Device Pairing & QR Code Card
+        qr_card = ctk.CTkFrame(content, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER_COLOR)
+        qr_card.pack(fill="x", pady=8)
+
+        ctk.CTkLabel(qr_card, text="📱 MOBILE DEVICE QR CODE PAIRING", font=FONT_SUBHEADING, text_color=CYAN_ACCENT).pack(anchor="w", padx=16, pady=(14, 4))
+        ctk.CTkLabel(
+            qr_card,
+            text="Scan this QR code with the Jarvis Mobile App to connect your phone for remote PC control, trackpad, and screen streaming.",
+            font=FONT_SMALL,
+            text_color=TEXT_SECONDARY,
+            wraplength=600,
+        ).pack(anchor="w", padx=16, pady=(0, 10))
+
+        qr_path = generate_pairing_qr_code(vps_url=self.current_server)
+        if os.path.exists(qr_path):
+            try:
+                pil_img = Image.open(qr_path)
+                self.qr_image = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(160, 160))
+                qr_label = ctk.CTkLabel(qr_card, image=self.qr_image, text="")
+                qr_label.pack(anchor="w", padx=20, pady=8)
+            except Exception as e:
+                ctk.CTkLabel(qr_card, text=f"Error loading QR: {e}", text_color="red").pack(padx=16, pady=8)
+
+        # 3. Voice Settings Card
         voice_card = ctk.CTkFrame(content, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER_COLOR)
         voice_card.pack(fill="x", pady=8)
 
@@ -108,15 +144,14 @@ class SettingsPage(ctk.CTkFrame):
             width=140,
             height=32,
             corner_radius=8,
-            command=lambda: self.on_test_voice("All voice synthesis channels are calibrated and fully operational, sir."),
+            command=lambda: self.on_test_voice("All neural systems and voice channels are calibrated and operational, sir."),
         ).pack(anchor="w", padx=16, pady=(8, 14))
 
-        # Server Settings Card
+        # 4. Server Settings Card
         server_card = ctk.CTkFrame(content, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER_COLOR)
         server_card.pack(fill="x", pady=8)
 
         ctk.CTkLabel(server_card, text="CENTRALIZED VPS SERVER", font=FONT_SUBHEADING, text_color=CYAN_ACCENT).pack(anchor="w", padx=16, pady=(14, 8))
-
         ctk.CTkLabel(server_card, text="WebSocket Endpoint URL:", font=FONT_SMALL, text_color=TEXT_SECONDARY).pack(anchor="w", padx=16, pady=(4, 2))
 
         self.server_entry = ctk.CTkEntry(

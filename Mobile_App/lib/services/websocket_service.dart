@@ -11,8 +11,9 @@ enum ConnectionStateStatus {
 }
 
 class JarvisWebSocketService {
-  // Centralized VPS Server URL - Single source of truth for Mobile App
-  static const String serverUrl = 'ws://45.131.64.32:2004/ws/jarvis';
+  // Centralized VPS Server URL
+  static const String defaultServerUrl = 'ws://45.131.64.32:2004/ws/jarvis';
+  static String activeServerUrl = defaultServerUrl;
 
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
@@ -32,6 +33,11 @@ class JarvisWebSocketService {
   ConnectionStateStatus _currentStatus = ConnectionStateStatus.disconnected;
   ConnectionStateStatus get currentStatus => _currentStatus;
 
+  // Stream for Base64 JPEG PC Screen snapshots
+  final StreamController<String> _screenDataController =
+      StreamController<String>.broadcast();
+  Stream<String> get screenDataStream => _screenDataController.stream;
+
   // Pending requests: requestId -> Completer<JarvisResponse>
   final Map<String, Completer<JarvisResponse>> _pendingRequests = {};
 
@@ -47,8 +53,12 @@ class JarvisWebSocketService {
     }
   }
 
-  void connect() {
+  void connect({String? customUrl}) {
     if (_isDisposed) return;
+    if (customUrl != null && customUrl.isNotEmpty) {
+      activeServerUrl = customUrl;
+    }
+
     if (_currentStatus == ConnectionStateStatus.connected ||
         _currentStatus == ConnectionStateStatus.connecting) {
       return;
@@ -57,7 +67,7 @@ class JarvisWebSocketService {
     _setStatus(ConnectionStateStatus.connecting);
 
     try {
-      final uri = Uri.parse(serverUrl);
+      final uri = Uri.parse(activeServerUrl);
       _channel = WebSocketChannel.connect(uri);
 
       _subscription = _channel!.stream.listen(
@@ -71,6 +81,13 @@ class JarvisWebSocketService {
 
       _setStatus(ConnectionStateStatus.connected);
       _reconnectAttempts = 0;
+
+      // Register mobile client with server
+      _channel!.sink.add(jsonEncode({
+        'type': 'register',
+        'client': 'android',
+        'device_name': 'Fayas-Mobile',
+      }));
     } catch (e) {
       _onDisconnected();
     }
@@ -79,8 +96,21 @@ class JarvisWebSocketService {
   void _onMessageReceived(dynamic message) {
     try {
       final Map<String, dynamic> data = jsonDecode(message.toString());
-      final response = JarvisResponse.fromJson(data);
+      final msgType = data['type'];
 
+      // 1. Screen capture or remote PC response
+      if (msgType == 'remote_pc_response') {
+        if (data['command'] == 'screen_data' && data['screen'] != null) {
+          final b64 = data['screen'].toString();
+          if (!_screenDataController.isClosed) {
+            _screenDataController.add(b64);
+          }
+        }
+        return;
+      }
+
+      // 2. Standard response
+      final response = JarvisResponse.fromJson(data);
       final requestId = response.requestId;
       if (requestId.isNotEmpty && _pendingRequests.containsKey(requestId)) {
         final completer = _pendingRequests.remove(requestId);
@@ -98,7 +128,6 @@ class JarvisWebSocketService {
     _subscription = null;
     _channel = null;
 
-    // Fail all pending requests with error
     for (final entry in _pendingRequests.entries) {
       if (!entry.value.isCompleted) {
         entry.value.complete(JarvisResponse.error(
@@ -177,11 +206,77 @@ class JarvisWebSocketService {
     );
   }
 
+  // ==========================================
+  // Remote PC Control Methods
+  // ==========================================
+
+  void sendRemoteCommand(String command, {Map<String, dynamic>? extras}) {
+    if (_channel == null || _currentStatus != ConnectionStateStatus.connected) return;
+    try {
+      final payload = {
+        'type': 'remote_pc_command',
+        'client': 'android',
+        'command': command,
+        ...?extras,
+      };
+      _channel!.sink.add(jsonEncode(payload));
+    } catch (_) {}
+  }
+
+  void sendMouseMove(double dx, double dy, {double sensitivity = 1.6}) {
+    sendRemoteCommand('mouse_move', extras: {'dx': dx, 'dy': dy, 'sensitivity': sensitivity});
+  }
+
+  void sendMouseClick(String button) {
+    sendRemoteCommand('mouse_click', extras: {'button': button});
+  }
+
+  void sendMouseDoubleClick() {
+    sendRemoteCommand('mouse_double_click');
+  }
+
+  void sendMouseScroll(int amount) {
+    sendRemoteCommand('mouse_scroll', extras: {'amount': amount});
+  }
+
+  void sendKeyType(String text) {
+    sendRemoteCommand('key_type', extras: {'text': text});
+  }
+
+  void sendKeyPress(String key) {
+    sendRemoteCommand('key_press', extras: {'key': key});
+  }
+
+  void requestPcScreen() {
+    sendRemoteCommand('get_screen');
+  }
+
+  void shutdownPc() {
+    sendRemoteCommand('shutdown_pc');
+  }
+
+  void restartPc() {
+    sendRemoteCommand('restart_pc');
+  }
+
+  void lockPc() {
+    sendRemoteCommand('lock_pc');
+  }
+
+  void openChromeOnPc() {
+    sendRemoteCommand('open_chrome');
+  }
+
+  void openWhatsAppOnPc() {
+    sendRemoteCommand('open_whatsapp');
+  }
+
   void dispose() {
     _isDisposed = true;
     _reconnectTimer?.cancel();
     _subscription?.cancel();
     _channel?.sink.close();
     _connectionStateController.close();
+    _screenDataController.close();
   }
 }

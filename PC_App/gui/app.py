@@ -103,6 +103,7 @@ class JarvisApp(ctk.CTk):
         self.client = JarvisClient(
             server_url=self.server_url,
             on_status_change=self._on_vps_status,
+            on_remote_event=self._on_remote_event,
         )
         self.listener = SpeechListener(
             on_wake_detected=self._on_wake_detected,
@@ -327,6 +328,15 @@ class JarvisApp(ctk.CTk):
         if not self.listening_enabled:  # Skip if listening is disabled
             return
         self.after(0, lambda: self.process_user_command(command_text))
+
+    def _on_remote_event(self, event_data: dict):
+        """Called when a mobile remote control action is received and executed."""
+        cmd = event_data.get("command", "")
+        # Only log non-motion events to avoid spamming the UI on mouse move
+        if cmd not in ("mouse_move", "get_screen"):
+            msg = f"Mobile Remote Action: {cmd}"
+            self.after(0, lambda: self.pages["chat"].add_message("assistant", f"📱 Executed mobile remote command: {cmd}"))
+
 
     def _on_vps_status(self, status: str):
         def _update():

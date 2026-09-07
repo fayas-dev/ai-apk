@@ -1,7 +1,7 @@
 """
-Jarvis PC Client - WebSocket Client
-Maintains a persistent connection to the VPS at ws://45.131.64.32:2004/ws/jarvis
-Handles automatic reconnects with exponential backoff, request UUIDs, and timeout handling.
+Jarvis PC Client - WebSocket Client & Remote Control Listener
+Maintains persistent connection to the VPS at ws://45.131.64.32:2004/ws/jarvis
+Handles automatic reconnects, request UUIDs, and executes incoming remote control events.
 """
 
 import asyncio
@@ -21,6 +21,7 @@ from config import (
     RECONNECT_MAX_DELAY,
     REQUEST_TIMEOUT,
 )
+from remote_controller import RemoteController
 
 logger = logging.getLogger("JarvisClient")
 
@@ -30,9 +31,11 @@ class JarvisClient:
         self,
         server_url: str = JARVIS_SERVER_URL,
         on_status_change: Optional[Callable[[str], None]] = None,
+        on_remote_event: Optional[Callable[[Dict[str, Any]], None]] = None,
     ):
         self.server_url = server_url
         self.on_status_change = on_status_change
+        self.on_remote_event = on_remote_event
         self.is_connected = False
         self._running = False
         self._websocket: Optional[websockets.WebSocketClientProtocol] = None
@@ -81,6 +84,13 @@ class JarvisClient:
                     self._notify_status("VPS connected")
                     logger.info("Successfully connected to Jarvis VPS")
 
+                    # Register as PC client with server
+                    await ws.send(json.dumps({
+                        "type": "register",
+                        "client": "pc",
+                        "pc_name": "Fayas-PC",
+                    }))
+
                     await self._receive_loop(ws)
 
             except (ConnectionClosed, OSError, Exception) as e:
@@ -102,13 +112,40 @@ class JarvisClient:
         async for raw_msg in ws:
             try:
                 data = json.loads(raw_msg)
+                msg_type = data.get("type")
+
+                # 1. Check for pending command replies
                 req_id = data.get("request_id")
                 if req_id and req_id in self._pending_requests:
                     fut = self._pending_requests.pop(req_id)
                     if not fut.done():
                         fut.set_result(data)
-                else:
-                    logger.info("Received unsolicited or broadcast message: %s", data)
+                    continue
+
+                # 2. Check for Remote PC Control commands relayed from Mobile
+                if msg_type == "remote_pc_command":
+                    logger.info("Received mobile remote control command: %s", data.get("command"))
+                    res = RemoteController.execute_remote_command(data)
+
+                    # Notify GUI if callback registered
+                    if self.on_remote_event:
+                        try:
+                            self.on_remote_event(data)
+                        except Exception:
+                            pass
+
+                    # If screen was requested, relay screen base64 back to mobile
+                    if data.get("command") in ("get_screen", "view_pc_screen") and res.get("screen"):
+                        screen_reply = {
+                            "type": "remote_pc_response",
+                            "command": "screen_data",
+                            "screen": res["screen"],
+                        }
+                        await ws.send(json.dumps(screen_reply))
+                    continue
+
+                logger.info("Received VPS broadcast: %s", data)
+
             except Exception as e:
                 logger.error("Error processing message from VPS: %s", e)
 

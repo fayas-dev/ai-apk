@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/jarvis_response.dart';
+import '../services/mobile_actions.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
 import '../services/websocket_service.dart';
+import 'remote_trackpad_screen.dart';
+import 'settings_screen.dart';
 
 enum AssistantState {
   disconnected,
@@ -215,6 +218,24 @@ class _HomeScreenState extends State<HomeScreen>
 
         await _ttsService.speak(response.speech);
 
+        // Execute native mobile actions if applicable
+        if (response.action == 'open_whatsapp') {
+          MobileActionsService.openWhatsApp();
+        } else if (response.action == 'send_whatsapp_message') {
+          MobileActionsService.openWhatsApp(phone: response.target, message: response.speech);
+        } else if (response.action == 'make_phone_call' && response.target != null) {
+          MobileActionsService.makePhoneCall(response.target!);
+        } else if (response.action == 'open_chrome') {
+          MobileActionsService.openChrome();
+        } else if (response.action == 'view_pc_screen' || response.action == 'mouse_control') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => RemoteTrackpadScreen(wsService: _wsService),
+            ),
+          );
+        }
+
         if (mounted) {
           // Keep microphone active for up to 30s for continuous conversation
           _start30SecondListeningSession();
@@ -323,33 +344,67 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                       ],
                     ),
-                    // VPS Status Badge
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: statusColor.withValues(alpha: 0.5),
-                          width: 1,
+                    Row(
+                      children: [
+                        // Remote PC Trackpad Button
+                        IconButton(
+                          icon: const Icon(Icons.laptop_chromebook_rounded, color: Color(0xFF00E5FF), size: 22),
+                          tooltip: 'PC Remote Control',
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => RemoteTrackpadScreen(wsService: _wsService),
+                              ),
+                            );
+                          },
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: statusColor.withValues(alpha: 0.25),
-                            blurRadius: 10,
-                            spreadRadius: 1,
+                        // Settings Button
+                        IconButton(
+                          icon: const Icon(Icons.settings_rounded, color: Color(0xFF00E5FF), size: 22),
+                          tooltip: 'Jarvis Settings',
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => SettingsScreen(
+                                  wsService: _wsService,
+                                  ttsService: _ttsService,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 4),
+                        // VPS Status Badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: statusColor.withValues(alpha: 0.5),
+                              width: 1,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: statusColor.withValues(alpha: 0.25),
+                                blurRadius: 10,
+                                spreadRadius: 1,
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Text(
-                        _getStateLabel(),
-                        style: TextStyle(
-                          color: statusColor,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
+                          child: Text(
+                            _getStateLabel(),
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),

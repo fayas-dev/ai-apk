@@ -40,6 +40,11 @@ Mobile_App/android/app/google-services.json
 *.env
 VPS/.env
 
+# Generated APKs & Archives
+*.apk
+*.zip
+Mobile_App/Release_APK/
+
 # OS
 .DS_Store
 Thumbs.db
