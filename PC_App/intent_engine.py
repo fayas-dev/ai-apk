@@ -6,9 +6,13 @@ Owner: Muhammad Fayas (Fayas), born 21/03/2010, Kaipamangalam Thainagar, Thrissu
 """
 
 import datetime
+import json
 import logging
+import os
 import re
 from typing import Any, Dict, Optional, Tuple
+
+import requests
 
 logger = logging.getLogger("JarvisIntent")
 
@@ -138,6 +142,35 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
         if re.search(pat, clean, re.IGNORECASE):
             is_malayalam = bool(re.search(r"[\u0D00-\u0D7F]", query))
             speech = PERSONA_RESPONSE_ML if is_malayalam else PERSONA_RESPONSE_EN
+            return {
+                "success": True,
+                "action": "speak",
+                "target": None,
+                "speech": speech,
+            }
+
+    # 1.5 Greetings & Check-in
+    greeting_patterns = [
+        r"^(hi|hello|hey|hai|hlo|greetings)\b",
+        r"\b(how are you|how are u|how r u|സുഖമാണോ)\b",
+        r"\b(good\s*(morning|afternoon|evening|night))\b",
+        r"^(നമസ്കാരം|ഹലോ|ഹായ്)\b",
+    ]
+    for pat in greeting_patterns:
+        if re.search(pat, clean, re.IGNORECASE):
+            is_malayalam = bool(re.search(r"[\u0D00-\u0D7F]", query))
+            if is_malayalam:
+                speech = "നമസ്കാരം സർ. സിസ്റ്റങ്ങൾ പ്രവർത്തനക്ഷമമാണ്. ഞാൻ എന്തിനാണ് സഹായിക്കേണ്ടത്?"
+            elif "how are" in clean or "how r" in clean:
+                speech = "I am operating at peak efficiency, sir. All neural and desktop subsystems are online. How can I assist you today?"
+            elif "morning" in clean:
+                speech = "Good morning, sir. Systems are online and ready for your commands."
+            elif "evening" in clean:
+                speech = "Good evening, sir. I am standing by to assist you."
+            elif "night" in clean:
+                speech = "Good night, sir. Subsystems will remain on standby."
+            else:
+                speech = "Hello, sir. Systems are fully operational and I am at your command. What would you like me to do?"
             return {
                 "success": True,
                 "action": "speak",
@@ -325,9 +358,64 @@ def evaluate_local_intent(query: str) -> Optional[Dict[str, Any]]:
 
 
 def query_openrouter_direct(query: str) -> Optional[Dict[str, Any]]:
-    """Compatibility stub: AI calls are deliberately VPS-only.
+    """Direct OpenRouter LLM call as a fallback when VPS relay is temporarily unreachable."""
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip()
+    base_url = os.getenv(
+        "OPENROUTER_BASE_URL",
+        "https://openrouter.ai/api/v1/chat/completions",
+    ).strip()
 
-    Keeping provider credentials out of desktop and mobile packages prevents a
-    copied app or a lost computer from exposing the server-side AI credential.
-    """
+    if not api_key:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/fayas-dev/ai-apk",
+        "X-Title": "JARVIS Neural Desktop",
+    }
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 400,
+    }
+
+    try:
+        resp = requests.post(base_url, headers=headers, json=payload, timeout=12.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            raw_content = data["choices"][0]["message"]["content"].strip()
+
+            action = "speak"
+            target = None
+            speech = raw_content
+
+            try:
+                json_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group(0))
+                    action = parsed.get("action", "speak")
+                    target = parsed.get("target")
+                    speech = parsed.get("speech", raw_content)
+            except Exception:
+                pass
+
+            speech = sanitize_speech_reply(speech)
+            return {
+                "success": True,
+                "action": action,
+                "target": target,
+                "speech": speech,
+            }
+        else:
+            logger.warning("OpenRouter API returned status %s: %s", resp.status_code, resp.text[:150])
+    except Exception as e:
+        logger.warning("Direct OpenRouter call failed: %s", e)
+
     return None

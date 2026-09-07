@@ -15,7 +15,7 @@ from pystray import MenuItem as item
 
 from actions import check_and_handle_confirmation, execute_action
 from config import JARVIS_ENABLE_LOCAL_DIRECT, JARVIS_SERVER_URL, JARVIS_TTS_ENABLED, LOGO_ICO, LOGO_PNG
-from intent_engine import evaluate_local_intent, sanitize_speech_reply
+from intent_engine import evaluate_local_intent, query_openrouter_direct, sanitize_speech_reply
 from local_server import LocalDirectServer
 from gui.actions_page import ActionsPage
 from gui.chat_page import ChatPage
@@ -493,9 +493,24 @@ class JarvisApp(ctk.CTk):
                 self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
                 return
 
-            # Step 4: Fallback for unhandled inputs (AI/NLP local-only processing logic here)
+            # Step 4: Fallback to Direct OpenRouter AI query
+            try:
+                ai_resp = query_openrouter_direct(command_text)
+                if ai_resp and ai_resp.get("success", False):
+                    action_name = ai_resp.get("action", "speak")
+                    target = ai_resp.get("target")
+                    speech_reply = ai_resp.get("speech", "")
+                    action_log = None
+                    if action_name != "speak":
+                        success, action_log = execute_action(action_name, target)
+                    self.after(0, lambda: self._finalize_action(action_name, speech_reply, action_log))
+                    return
+            except Exception:
+                pass
+
+            # Step 5: Final offline fallback
             self.after(0, lambda: self._finalize_action(
-                "speak", "Command received offline. Neural relay is currently inaccessible; manual override required.", None
+                "speak", "I am currently running in local offline mode, sir. How can I assist you?", None
             ))
 
         threading.Thread(target=_worker, daemon=True).start()
